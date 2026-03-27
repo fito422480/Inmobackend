@@ -13,14 +13,14 @@ npm run start:dev
 
 | Variable     | Valor                                          |
 |--------------|------------------------------------------------|
-| SSH_HOST     | 100.123.107.110                                |
+| SSH_HOST     | xxx.xxx.xxx.xxx                                |
 | SSH_PORT     | 22                                             |
 | SSH_USER     | sistemas                                       |
 | SSH_PASSWORD | tu_password_rdp                                |
-| ORA_HOST     | 129.151.122.103                                |
+| ORA_HOST     | xxx.xxx.xxx.xxx                                |
 | ORA_PORT     | 1521                                           |
-| ORA_SERVICE  | INMO.srpubchile.redprincipalchi.oraclevcn.com |
-| ORA_USER     | inmo_dbu                                       |
+| ORA_SERVICE  | xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx |
+| ORA_USER     | xxxxxxxx                                       |
 | ORA_PASSWORD | tu_password_oracle                             |
 | ORA_CLIENT_LIB_DIR | Opcional. Ruta a Oracle Instant Client si no está en PATH |
 | APP_PORT     | 3000                                           |
