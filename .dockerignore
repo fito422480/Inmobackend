@@ -1,0 +1,9 @@
+.git
+.gitignore
+.vscode
+.tmp-tsc
+dist
+node_modules
+.env
+npm-debug.log
+docker/oracle/instantclient

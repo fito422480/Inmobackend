@@ -1,0 +1,18 @@
+services:
+  inmobackend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: inmobackend
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      APP_PORT: ${APP_PORT:-3000}
+      ORA_CLIENT_LIB_DIR: /opt/oracle/instantclient
+    ports:
+      - "${APP_PORT:-3000}:${APP_PORT:-3000}"
+    volumes:
+      # Colocá aquí Oracle Instant Client para Linux x64/amd64.
+      - ./docker/oracle/instantclient:/opt/oracle/instantclient:ro
+    restart: unless-stopped

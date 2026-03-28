@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { TunnelModule } from './tunnel/tunnel.module';
 import { DatabaseModule } from './database/database.module';
 import { CuotasPagadasModule } from './cuotas-pagadas/cuotas-pagadas.module';
+import { CuotasVencidasModule } from './cuotas-vencidas/cuotas-vencidas.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -12,6 +13,7 @@ import { AppService } from './app.service';
     TunnelModule,
     DatabaseModule,
     CuotasPagadasModule,
+    CuotasVencidasModule,
     // Agregá acá tus módulos
   ],
   controllers: [AppController],

@@ -13,6 +13,7 @@ export class TunnelService implements OnModuleDestroy {
   private readyPromise: Promise<void>;
 
   constructor(private config: ConfigService) {
+    this.localPort = parseInt(this.config.get("SSH_LOCAL_PORT") || "15210");
     this.readyPromise = new Promise((resolve) => {
       this.readyResolve = resolve;
     });
@@ -48,11 +49,12 @@ export class TunnelService implements OnModuleDestroy {
       reconnectOnError: false,
     };
 
-    const serverOptions = { port: this.localPort };
+    const serverOptions = {
+      host: "127.0.0.1",
+      port: this.localPort,
+    };
 
     const forwardOptions = {
-      srcAddr: "127.0.0.1",
-      srcPort: this.localPort,
       dstAddr: this.config.get("ORA_HOST"),
       dstPort: parseInt(this.config.get("ORA_PORT") || "1521"),
     };
@@ -70,6 +72,10 @@ export class TunnelService implements OnModuleDestroy {
       );
 
       this.tunnelServer = server;
+      const address = server.address();
+      if (address && typeof address !== "string") {
+        this.localPort = address.port;
+      }
       this.ready = true;
 
       // Resolver la promesa para desbloquear TypeORM
@@ -88,6 +94,15 @@ export class TunnelService implements OnModuleDestroy {
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("EADDRINUSE")) {
+        this.localPort = await this.findAvailablePort(this.localPort + 1);
+        this.logger.warn(
+          `Puerto local ocupado. Reintentando túnel SSH en localhost:${this.localPort}...`,
+        );
+        setTimeout(() => this.openTunnel(), 1000);
+        return;
+      }
+
       this.logger.error(`Error abriendo túnel SSH: ${message}`);
       this.logger.log("Reintentando en 10 segundos...");
       setTimeout(() => this.openTunnel(), 10000);
@@ -112,5 +127,28 @@ export class TunnelService implements OnModuleDestroy {
     });
     await new Promise((r) => setTimeout(r, 5000));
     await this.openTunnel();
+  }
+
+  private async findAvailablePort(startPort: number): Promise<number> {
+    let port = startPort;
+
+    while (!(await this.isPortFree(port))) {
+      port += 1;
+    }
+
+    return port;
+  }
+
+  private isPortFree(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const tester = net.createServer();
+
+      tester.once("error", () => resolve(false));
+      tester.once("listening", () => {
+        tester.close(() => resolve(true));
+      });
+
+      tester.listen(port, "127.0.0.1");
+    });
   }
 }
