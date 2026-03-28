@@ -178,6 +178,7 @@ Ruta base:
 Parámetros principales:
 
 - `limit` o `limite`
+- `cursor`
 - `offset`
 - `incluirTotal`
 - `numeroContrato`
@@ -188,22 +189,55 @@ Parámetros principales:
 - `estadoContrato`
 - `estadoCuota`
 - `vendedor`
+- `mesesMoraDesde`
+- `mesesMoraHasta`
+- `mesesMoraHastaExclusivo`
 - `fechaVencimientoDesde`
 - `fechaVencimientoHasta`
 - `ultimoPagoDesde`
 - `ultimoPagoHasta`
 
+Orden actual:
+
+- `mesesMora DESC`
+- `fechaVencimiento ASC`
+- `numeroContrato ASC`
+- `numeroCuota ASC`
+
 Ejemplos:
 
 ```http
-GET /cuotas-vencidas?limit=100&offset=0
-GET /cuotas-vencidas?limit=100&offset=100
-GET /cuotas-vencidas?estadoCuota=VENCIDA&fechaVencimientoDesde=2024-01-01&limit=100&offset=0
+GET /cuotas-vencidas?limit=100
+GET /cuotas-vencidas?limit=100&cursor=<nextCursor>
+GET /cuotas-vencidas?estadoCuota=VENCIDA&fechaVencimientoDesde=2024-01-01&limit=100
+GET /cuotas-vencidas?mesesMoraDesde=0&mesesMoraHastaExclusivo=31&limit=100
+GET /cuotas-vencidas?mesesMoraDesde=31&mesesMoraHastaExclusivo=91&limit=100
+GET /cuotas-vencidas?mesesMoraDesde=91&limit=100
+```
+
+`mesesMoraHasta` es inclusivo (`<=`). Si necesitás cortes sin solape, usá `mesesMoraHastaExclusivo` (`<`) y no lo combines con `mesesMoraHasta`.
+
+Respuesta típica con cursor:
+
+```json
+{
+  "data": [],
+  "total": null,
+  "limite": 100,
+  "offset": null,
+  "pagina": null,
+  "totalPaginas": null,
+  "incluirTotal": false,
+  "modoPaginacion": "cursor",
+  "cursorActual": null,
+  "nextCursor": "eyJmdiI6IjIwMjQtMDEtMDEgMDA6MDA6MDAiLCJuYyI6IjEyMyIsIm5xIjoxfQ",
+  "tieneMas": true
+}
 ```
 
 ## Paginación y rendimiento
 
-`cuotas-pagadas` y `cuotas-vencidas` soportan paginación por `offset`.
+`cuotas-pagadas` soporta paginación por `offset`. `cuotas-vencidas` ahora usa `cursor` como mecanismo recomendado y mantiene `offset` solo por compatibilidad.
 
 Recomendaciones:
 

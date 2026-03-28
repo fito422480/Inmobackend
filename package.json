@@ -8,7 +8,8 @@
     "start": "node dist/main.js",
     "start:dev": "node dev-runner.js",
     "start:prod": "node dist/main.js",
-    "start:tunnel": "concurrently \"npm run start:dev\" \"cloudflared tunnel --url http://localhost:3000\""
+    "start:tunnel": "concurrently \"npm run start:dev\" \"cloudflared tunnel --url http://localhost:3000\"",
+    "export:cuotas-vencidas": "node scripts/export-cuotas-vencidas-csv.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.17",

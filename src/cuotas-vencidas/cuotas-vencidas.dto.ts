@@ -1,6 +1,7 @@
 export class PaginacionDto {
   limite?: number;
   offset?: number;
+  cursor?: string;
   incluirTotal?: boolean;
   numeroContrato?: string;
   documento?: string;
@@ -10,6 +11,11 @@ export class PaginacionDto {
   estadoContrato?: string;
   estadoCuota?: string;
   vendedor?: string;
+  mesesMoraDesde?: number;
+  mesesMoraHasta?: number;
+  mesesMoraHastaExclusivo?: number;
+  fechaDesde?: string;
+  fechaHasta?: string;
   fechaVencimientoDesde?: string;
   fechaVencimientoHasta?: string;
   ultimoPagoDesde?: string;
@@ -20,9 +26,12 @@ export class PaginacionResponseDto<T> {
   data: T[];
   total: number | null;
   limite: number;
-  offset: number;
-  pagina: number;
+  offset: number | null;
+  pagina: number | null;
   totalPaginas: number | null;
   incluirTotal: boolean;
+  modoPaginacion: 'cursor' | 'offset';
+  cursorActual?: string | null;
+  nextCursor?: string | null;
   tieneMas?: boolean;
 }
