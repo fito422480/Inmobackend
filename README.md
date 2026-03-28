@@ -89,171 +89,71 @@ npm install
 npm run start:dev
 ```
 
-Este comando usa `dev-runner.js`, que:
+## Variables de entorno (.env)
 
-- compila el proyecto,
-- observa cambios en `src/`, `tsconfig.json`, `nest-cli.json` y `.env`,
-- reinicia automáticamente el backend al detectar cambios.
+| Variable     | Valor                                          |
+|--------------|------------------------------------------------|
+| SSH_HOST     | 100.123.107.110                                |
+| SSH_PORT     | 22                                             |
+| SSH_USER     | sistemas                                       |
+| SSH_PASSWORD | tu_password_rdp                                |
+| ORA_HOST     | 129.151.122.103                                |
+| ORA_PORT     | 1521                                           |
+| ORA_SERVICE  | INMO.srpubchile.redprincipalchi.oraclevcn.com |
+| ORA_USER     | inmo_dbu                                       |
+| ORA_PASSWORD | tu_password_oracle                             |
+| ORA_CLIENT_LIB_DIR | Opcional. Ruta a Oracle Instant Client si no está en PATH |
+| APP_PORT     | 3000                                           |
 
-### Build y ejecución normal
+## Oracle Thick Mode
 
-```bash
-npm run build
-npm start
+Esta base Oracle exige Native Network Encryption / Data Integrity, así que `node-oracledb`
+debe correr en `thick mode`.
+
+- Si Oracle Instant Client ya está en el `PATH`, el backend lo usa automáticamente.
+- Si no está en el `PATH`, definí `ORA_CLIENT_LIB_DIR` con la carpeta donde está `oci.dll`.
+
+## Lo que hace al iniciar
+
+1. Abre túnel SSH → svr-01 (100.123.107.110)
+2. Forwarding localhost:15210 → Oracle (129.151.122.103:1521)
+3. TypeORM crea el pool de conexiones automáticamente
+4. Si el túnel se cae, se reconecta solo
+
+## Crear un nuevo módulo con tu tabla Oracle
+
+### 1 — Creá la entidad (mapeá tu tabla)
+
+```typescript
+// src/tu-modulo/tu.entity.ts
+@Entity({ name: 'NOMBRE_TABLA_ORACLE' })
+export class TuEntity {
+  @PrimaryGeneratedColumn({ name: 'ID' })
+  id: number;
+
+  @Column({ name: 'COLUMNA' })
+  columna: string;
+}
 ```
 
-## Docker
+### 2 — Creá el servicio
 
-Se incluye un `Dockerfile` multi-stage y un `docker-compose.yml`.
+```typescript
+@Injectable()
+export class TuService {
+  constructor(
+    @InjectRepository(TuEntity)
+    private repo: Repository<TuEntity>,
+  ) {}
 
-### Antes de levantar Docker
-
-1. Crear `.env`.
-2. Copiar Oracle Instant Client para Linux `x64/amd64` dentro de:
-
-```text
-docker/oracle/instantclient
+  findAll() { return this.repo.find(); }
+  findOne(id: number) { return this.repo.findOne({ where: { id } }); }
+  create(data: Partial<TuEntity>) { return this.repo.save(this.repo.create(data)); }
+  update(id: number, data: Partial<TuEntity>) { return this.repo.update(id, data); }
+}
 ```
 
-Ese directorio se monta dentro del contenedor en:
-
-```text
-/opt/oracle/instantclient
-```
-
-### Levantar con Docker Compose
-
-```bash
-docker compose up --build -d
-```
-
-### Detener
-
-```bash
-docker compose down
-```
-
-Notas:
-
-- El contenedor expone `APP_PORT`.
-- `docker-compose.yml` carga variables desde `.env`.
-- El proyecto sigue necesitando acceso real al servidor SSH y a Oracle.
-
-## Scripts disponibles
-
-| Script | Descripción |
-| --- | --- |
-| `npm run build` | Compila NestJS a `dist/` |
-| `npm start` | Ejecuta `dist/main.js` |
-| `npm run start:dev` | Desarrollo con recompilación y reinicio automático |
-| `npm run start:prod` | Ejecuta `dist/main.js` |
-| `npm run start:tunnel` | Levanta la app y además publica con `cloudflared` |
-
-## Flujo de arranque
-
-Al iniciar la aplicación:
-
-1. `TunnelService` intenta abrir el túnel SSH.
-2. Si el puerto local preferido está ocupado, busca el siguiente libre.
-3. `DatabaseModule` espera a que el túnel esté listo.
-4. TypeORM crea el pool Oracle usando el puerto local del túnel.
-5. Si el túnel falla, el servicio intenta reconectar.
-
-## Endpoints actuales
-
-### Estado general
-
-| Método | Ruta | Descripción |
-| --- | --- | --- |
-| `GET` | `/` | Estado simple del backend |
-| `GET` | `/test-oracle` | Ejecuta `SELECT SYSDATE AS fecha FROM DUAL` |
-
-### Cuotas pagadas
-
-Ruta base:
-
-```text
-/cuotas-pagadas
-```
-
-Parámetros principales:
-
-- `limite`
-- `offset`
-- `incluirTotal`
-- `numeroContrato`
-- `documento`
-- `idCliente`
-- `sucursal`
-- `estadoActualContrato`
-- `moneda`
-- `fechaDesde`
-- `fechaHasta`
-
-Ejemplos:
-
-```http
-GET /cuotas-pagadas?limite=100&offset=0
-GET /cuotas-pagadas?limite=100&offset=0&incluirTotal=false
-GET /cuotas-pagadas?documento=1234567&limite=100&offset=0
-```
-
-### Cuotas vencidas
-
-Ruta base:
-
-```text
-/cuotas-vencidas
-```
-
-Parámetros principales:
-
-- `limit` o `limite`
-- `offset`
-- `incluirTotal`
-- `numeroContrato`
-- `documento`
-- `idCliente`
-- `sucursal`
-- `estado`
-- `estadoContrato`
-- `estadoCuota`
-- `vendedor`
-- `fechaVencimientoDesde`
-- `fechaVencimientoHasta`
-- `ultimoPagoDesde`
-- `ultimoPagoHasta`
-
-Ejemplos:
-
-```http
-GET /cuotas-vencidas?limit=100&offset=0
-GET /cuotas-vencidas?limit=100&offset=100
-GET /cuotas-vencidas?estadoCuota=VENCIDA&fechaVencimientoDesde=2024-01-01&limit=100&offset=0
-```
-
-## Paginación y rendimiento
-
-`cuotas-pagadas` y `cuotas-vencidas` soportan paginación por `offset`.
-
-Recomendaciones:
-
-- usar páginas chicas o medianas, por ejemplo `100` o `500`,
-- evitar `COUNT(*)` cuando no haga falta,
-- preferir `incluirTotal=false` para vistas muy grandes.
-
-En `cuotas-vencidas`, `incluirTotal` queda desactivado por defecto para responder más rápido sobre volúmenes altos.
-
-## Desarrollo de nuevos módulos
-
-Para agregar un nuevo módulo Oracle:
-
-1. Crear una entidad o vista en `src/<modulo>/<modulo>.entity.ts`.
-2. Crear `service`, `controller` y `module`.
-3. Registrar la entidad con `TypeOrmModule.forFeature(...)`.
-4. Importar el módulo en `AppModule`.
-
-Ejemplo base:
+### 3 — Registrá en el módulo
 
 ```typescript
 @Module({
