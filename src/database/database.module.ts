@@ -11,16 +11,17 @@ import { DatabaseService } from './database.service';
     TypeOrmModule.forRootAsync({
       inject: [ConfigService, TunnelService],
       useFactory: async (config: ConfigService, tunnel: TunnelService) => {
-        // Esperar que el túnel SSH esté listo antes de conectar
+        // Esperar que la ruta de conexion quede lista antes de conectar
         await tunnel.waitUntilReady();
 
-        const localPort = tunnel.getLocalPort();
+        const databaseHost = tunnel.getDatabaseHost();
+        const databasePort = tunnel.getDatabasePort();
         const oracleClientLibDir = config.get<string>('ORA_CLIENT_LIB_DIR');
 
         return {
           type: 'oracle',
-          host: 'localhost',
-          port: localPort,
+          host: databaseHost,
+          port: databasePort,
           serviceName: config.get('ORA_SERVICE'),
           username: config.get('ORA_USER'),
           password: config.get('ORA_PASSWORD'),
@@ -29,7 +30,7 @@ import { DatabaseService } from './database.service';
             : true,
           // Entidades: agregá las tuyas acá
           entities: [__dirname + '/../**/*.entity{.ts,.js}'],
-          synchronize: false,   // ⚠️ NUNCA en true con Oracle en producción
+          synchronize: false,   //NUNCA en true con Oracle en producción
           logging: config.get('NODE_ENV') !== 'production',
           extra: {
             poolMin: 2,

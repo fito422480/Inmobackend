@@ -14,7 +14,7 @@ export class DatabaseService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    // Esperar que el túnel esté listo antes de crear el pool
+    // Esperar que la ruta de conexion quede lista antes de crear el pool
     await this.tunnel.waitUntilReady();
     await this.createPool();
   }
@@ -23,14 +23,15 @@ export class DatabaseService implements OnModuleInit {
     try {
       this.enableThickMode();
 
-      const localPort = this.tunnel.getLocalPort();
+      const host = this.tunnel.getDatabaseHost();
+      const port = this.tunnel.getDatabasePort();
 
-      this.logger.log(` Conectando a Oracle vía localhost:${localPort}`);
+      this.logger.log(` Conectando a Oracle via ${host}:${port}`);
 
       this.pool = await oracledb.createPool({
         user: this.config.get("ORA_USER"),
         password: this.config.get("ORA_PASSWORD"),
-        connectString: `localhost:${localPort}/${this.config.get("ORA_SERVICE")}`,
+        connectString: `${host}:${port}/${this.config.get("ORA_SERVICE")}`,
         poolMin: 2,
         poolMax: 10,
         poolIncrement: 1,

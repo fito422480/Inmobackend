@@ -8,17 +8,32 @@ export class TunnelService implements OnModuleDestroy {
   private readonly logger = new Logger(TunnelService.name);
   private tunnelServer: net.Server | null = null;
   private localPort: number = 15210;
+  private readonly sshEnabled: boolean;
   private ready = false;
   private readyResolve: (() => void) | null = null;
   private readyPromise: Promise<void>;
 
   constructor(private config: ConfigService) {
+    this.sshEnabled = this.parseBoolean(
+      this.config.get<string>("SSH_ENABLED"),
+      true,
+    );
     this.localPort = parseInt(this.config.get("SSH_LOCAL_PORT") || "15210");
     this.readyPromise = new Promise((resolve) => {
       this.readyResolve = resolve;
     });
-    // Abrir el túnel al instanciar el servicio
-    this.openTunnel();
+
+    if (this.sshEnabled) {
+      // Abrir el túnel al instanciar el servicio
+      this.openTunnel();
+      return;
+    }
+
+    this.ready = true;
+    this.resolveReady();
+    this.logger.log(
+      `SSH deshabilitado. Conexion directa a Oracle -> ${this.getDatabaseHost()}:${this.getDatabasePort()}`,
+    );
   }
 
   onModuleDestroy() {
@@ -29,12 +44,38 @@ export class TunnelService implements OnModuleDestroy {
     return this.localPort;
   }
 
+  isEnabled(): boolean {
+    return this.sshEnabled;
+  }
+
+  getDatabaseHost(): string {
+    if (this.sshEnabled) {
+      return "localhost";
+    }
+
+    return this.config.get("ORA_HOST") || "localhost";
+  }
+
+  getDatabasePort(): number {
+    if (this.sshEnabled) {
+      return this.localPort;
+    }
+
+    return parseInt(this.config.get("ORA_PORT") || "1521");
+  }
+
   // TypeORM llama a esto antes de conectar
   waitUntilReady(): Promise<void> {
     return this.readyPromise;
   }
 
   private async openTunnel(): Promise<void> {
+    if (!this.sshEnabled) {
+      this.ready = true;
+      this.resolveReady();
+      return;
+    }
+
     const sshConfig = {
       host: this.config.get("SSH_HOST"),
       port: parseInt(this.config.get("SSH_PORT") || "22"),
@@ -79,10 +120,7 @@ export class TunnelService implements OnModuleDestroy {
       this.ready = true;
 
       // Resolver la promesa para desbloquear TypeORM
-      if (this.readyResolve) {
-        this.readyResolve();
-        this.readyResolve = null;
-      }
+      this.resolveReady();
 
       this.logger.log(
         `Túnel SSH activo → localhost:${this.localPort} → ${forwardOptions.dstAddr}:${forwardOptions.dstPort}`,
@@ -119,6 +157,10 @@ export class TunnelService implements OnModuleDestroy {
   }
 
   private async reconnect(): Promise<void> {
+    if (!this.sshEnabled) {
+      return;
+    }
+
     this.logger.log("Reconectando túnel SSH...");
     this.closeTunnel();
     // Resetear la promesa de ready
@@ -150,5 +192,30 @@ export class TunnelService implements OnModuleDestroy {
 
       tester.listen(port, "127.0.0.1");
     });
+  }
+
+  private resolveReady(): void {
+    if (this.readyResolve) {
+      this.readyResolve();
+      this.readyResolve = null;
+    }
+  }
+
+  private parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
+    if (value === undefined) {
+      return defaultValue;
+    }
+
+    const normalizedValue = value.trim().toLowerCase();
+
+    if (["1", "true", "yes", "on"].includes(normalizedValue)) {
+      return true;
+    }
+
+    if (["0", "false", "no", "off"].includes(normalizedValue)) {
+      return false;
+    }
+
+    return defaultValue;
   }
 }

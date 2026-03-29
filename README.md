@@ -1,13 +1,13 @@
 # Inmobackend
 
-Backend en NestJS para consultar Oracle a través de un túnel SSH, usando TypeORM y `node-oracledb` en `thick mode`.
+Backend en NestJS para consultar Oracle con o sin túnel SSH, usando TypeORM y `node-oracledb` en `thick mode`.
 
 ## Qué hace
 
-- Abre un túnel SSH hacia el servidor puente.
-- Expone Oracle localmente a través de ese túnel.
-- Espera a que el túnel esté listo antes de crear el pool de TypeORM.
-- Intenta reconectar el túnel si se cae.
+- Puede abrir un túnel SSH hacia el servidor puente o conectarse directo a Oracle.
+- Si SSH está habilitado, expone Oracle localmente a través de ese túnel.
+- Espera a que la ruta de conexión esté lista antes de crear el pool de TypeORM.
+- Si el túnel SSH está habilitado y se cae, intenta reconectar.
 - Publica endpoints para consultar vistas Oracle como `cuotas-pagadas` y `cuotas-vencidas`.
 
 ## Stack
@@ -23,7 +23,7 @@ Backend en NestJS para consultar Oracle a través de un túnel SSH, usando TypeO
 
 - Node.js 20 o superior
 - npm
-- Acceso SSH al servidor puente
+- Acceso SSH al servidor puente, si `SSH_ENABLED=true`
 - Credenciales Oracle válidas
 - Oracle Instant Client
 
@@ -49,10 +49,13 @@ cp .env.example .env
 
 Luego completá las credenciales reales.
 
+Si querés conectarte sin SSH, configurá `SSH_ENABLED=false` y apuntá `ORA_HOST`/`ORA_PORT` al host y puerto directos de Oracle.
+
 ### Variables de entorno
 
 | Variable | Ejemplo |
 | --- | --- |
+| `SSH_ENABLED` | `true` |
 | `SSH_HOST` | `XXX.XXX.XXX.XXX` |
 | `SSH_PORT` | `XX` |
 | `SSH_USER` | `usuario_ssh` |
@@ -101,11 +104,11 @@ npm start
 
 Al iniciar la aplicación:
 
-1. Abre el túnel SSH hacia el servidor configurado.
-2. Hace forwarding desde `localhost:<puerto_local>` hacia Oracle.
-3. Espera a que el túnel esté disponible.
+1. Si `SSH_ENABLED=true`, abre el túnel SSH hacia el servidor configurado.
+2. Si `SSH_ENABLED=true`, hace forwarding desde `localhost:<puerto_local>` hacia Oracle.
+3. Espera a que la ruta de conexión esté disponible.
 4. Inicializa TypeORM y el pool Oracle.
-5. Si el túnel falla, intenta reconectar automáticamente.
+5. Si el túnel SSH está habilitado y falla, intenta reconectar automáticamente.
 
 ## Docker
 
