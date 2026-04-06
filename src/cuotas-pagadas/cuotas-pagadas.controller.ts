@@ -19,7 +19,7 @@ export class CuotasPagadasController {
    *   moneda              filtrar por moneda (PYG, USD, etc.)
    *   fechaDesde          filtrar FECHA_PAGO >= (YYYY-MM-DD)
    *   fechaHasta          filtrar FECHA_PAGO <= (YYYY-MM-DD)
-   *   incluirTotal        true|false (si es false evita COUNT(*) para responder más rápido)
+   *   incluirTotal        true|false (default: false para evitar COUNT(*) en vistas grandes)
    *
    * Ejemplos:
    *   GET /cuotas-pagadas?limite=100&offset=0

@@ -1,8 +1,18 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
 import { CuotasVencidasEntity } from './cuotas-vencidas.entity';
 import { PaginacionDto, PaginacionResponseDto } from './cuotas-vencidas.dto';
+import {
+  CacheEntry,
+  buildStableCacheKey,
+  countActiveFilters,
+  getCacheValue,
+  measureAsync,
+  parsePositiveNumber,
+  setCacheValue,
+} from '../common/query-performance.util';
 
 type CursorPayload = {
   mm: number;
@@ -12,30 +22,135 @@ type CursorPayload = {
 };
 
 type CuotasVencidasRow = CuotasVencidasEntity;
+type CuotasVencidasResponse = PaginacionResponseDto<CuotasVencidasEntity>;
+type QueryDebugSnapshot = {
+  label: string;
+  sql: string;
+  parameters: unknown[];
+};
 
 @Injectable()
 export class CuotasVencidasService {
   private static readonly NULL_DATE_CURSOR = '9999-12-31 23:59:59';
   private static readonly NULL_MORA_CURSOR = -1;
+  private readonly logger = new Logger(CuotasVencidasService.name);
+  private readonly cache = new Map<
+    string,
+    CacheEntry<CuotasVencidasResponse>
+  >();
+  private readonly inFlight = new Map<
+    string,
+    Promise<CuotasVencidasResponse>
+  >();
+  private readonly cacheTtlMs: number;
+  private readonly cacheMaxItems: number;
+  private readonly logSlowSql: boolean;
 
   constructor(
     @InjectRepository(CuotasVencidasEntity)
     private repo: Repository<CuotasVencidasEntity>,
-  ) {}
+    private configService: ConfigService,
+  ) {
+    this.cacheTtlMs = parsePositiveNumber(
+      this.configService.get('CUOTAS_VENCIDAS_CACHE_TTL_MS'),
+      15000,
+    );
+    this.cacheMaxItems = parsePositiveNumber(
+      this.configService.get('CUOTAS_VENCIDAS_CACHE_MAX_ITEMS'),
+      200,
+    );
+    this.logSlowSql = this.configService.get('LOG_SLOW_SQL') === 'true';
+  }
 
   async findAll(
     dto: PaginacionDto,
-  ): Promise<PaginacionResponseDto<CuotasVencidasEntity>> {
+  ): Promise<CuotasVencidasResponse> {
+    const startedAt = Date.now();
     const limite = Math.min(Math.max(dto.limite || 100, 1), 100000);
     const incluirTotal = dto.incluirTotal === true;
     const usarCursor = dto.cursor !== undefined || dto.offset === undefined;
+    const normalizedDto: Record<string, unknown> = {
+      ...dto,
+      limite,
+      incluirTotal,
+      modoPaginacion: usarCursor ? 'cursor' : 'offset',
+    };
 
-    if (usarCursor) {
-      return this.findAllByCursor(dto, limite, incluirTotal);
+    if (!usarCursor) {
+      normalizedDto.offset = Math.max(dto.offset || 0, 0);
     }
 
-    const offset = Math.max(dto.offset || 0, 0);
-    return this.findAllByOffset(dto, limite, offset, incluirTotal);
+    const cacheKey = buildStableCacheKey(normalizedDto);
+    const cached = getCacheValue(this.cache, cacheKey);
+    if (cached) {
+      this.logger.debug(
+        `cache hit cuotas-vencidas modo=${normalizedDto.modoPaginacion} incluirTotal=${incluirTotal}`,
+      );
+      return cached;
+    }
+
+    const pending = this.inFlight.get(cacheKey);
+    if (pending) {
+      this.logger.debug(
+        `cache join cuotas-vencidas modo=${normalizedDto.modoPaginacion} incluirTotal=${incluirTotal}`,
+      );
+      return pending;
+    }
+
+    const activeFilters = countActiveFilters(normalizedDto, [
+      'limite',
+      'offset',
+      'cursor',
+      'incluirTotal',
+      'modoPaginacion',
+    ]);
+
+    const loadPromise = (async () => {
+      if (usarCursor) {
+        const response = await this.findAllByCursor(
+          dto,
+          limite,
+          incluirTotal,
+          startedAt,
+          activeFilters,
+        );
+        setCacheValue(
+          this.cache,
+          cacheKey,
+          response,
+          this.cacheTtlMs,
+          this.cacheMaxItems,
+        );
+        return response;
+      }
+
+      const offset = Math.max(dto.offset || 0, 0);
+      const response = await this.findAllByOffset(
+        dto,
+        limite,
+        offset,
+        incluirTotal,
+        startedAt,
+        activeFilters,
+      );
+      setCacheValue(
+        this.cache,
+        cacheKey,
+        response,
+        this.cacheTtlMs,
+        this.cacheMaxItems,
+      );
+      return response;
+    })();
+
+    this.inFlight.set(cacheKey, loadPromise);
+    try {
+      return await loadPromise;
+    } finally {
+      if (this.inFlight.get(cacheKey) === loadPromise) {
+        this.inFlight.delete(cacheKey);
+      }
+    }
   }
 
   private async findAllByOffset(
@@ -43,7 +158,9 @@ export class CuotasVencidasService {
     limite: number,
     offset: number,
     incluirTotal: boolean,
-  ): Promise<PaginacionResponseDto<CuotasVencidasEntity>> {
+    startedAt: number,
+    filters: number,
+  ): Promise<CuotasVencidasResponse> {
     const pagina = Math.floor(offset / limite) + 1;
 
     const qb = this.repo.createQueryBuilder('v');
@@ -51,15 +168,15 @@ export class CuotasVencidasService {
     const dataQb = this.selectDataColumns(qb.clone());
 
     if (!incluirTotal) {
-      const data = await this.applyOrder(dataQb)
-        .skip(offset)
-        .take(limite + 1)
-        .getRawMany<CuotasVencidasRow>();
+      const pagedDataQb = this.applyOrder(dataQb).skip(offset).take(limite + 1);
+      const querySnapshots = [this.captureQuery('data', pagedDataQb)];
+      const dataResult = await measureAsync(() =>
+        pagedDataQb.getRawMany<CuotasVencidasRow>(),
+      );
 
-      const tieneMas = data.length > limite;
-
-      return {
-        data: data.slice(0, limite),
+      const tieneMas = dataResult.result.length > limite;
+      const response: CuotasVencidasResponse = {
+        data: dataResult.result.slice(0, limite),
         total: null,
         limite,
         offset,
@@ -71,35 +188,71 @@ export class CuotasVencidasService {
         nextCursor: null,
         tieneMas,
       };
+
+      this.logSlowRequest({
+        startedAt,
+        dataDurationMs: dataResult.durationMs,
+        countDurationMs: null,
+        limite,
+        incluirTotal: false,
+        rows: response.data.length,
+        filters,
+        modoPaginacion: 'offset',
+        querySnapshots,
+      });
+
+      return response;
     }
 
-    const [total, data] = await Promise.all([
-      qb.clone().getCount(),
-      this.applyOrder(this.selectDataColumns(qb.clone()))
-        .skip(offset)
-        .take(limite)
-        .getRawMany<CuotasVencidasRow>(),
+    const countQb = qb.clone();
+    const pagedDataQb = this.applyOrder(this.selectDataColumns(qb.clone()))
+      .skip(offset)
+      .take(limite);
+    const querySnapshots = [
+      this.captureQuery('count', countQb),
+      this.captureQuery('data', pagedDataQb),
+    ];
+
+    const [countResult, dataResult] = await Promise.all([
+      measureAsync(() => countQb.getCount()),
+      measureAsync(() => pagedDataQb.getRawMany<CuotasVencidasRow>()),
     ]);
 
-    return {
-      data,
-      total,
+    const response: CuotasVencidasResponse = {
+      data: dataResult.result,
+      total: countResult.result,
       limite,
       offset,
       pagina,
-      totalPaginas: Math.ceil(total / limite),
+      totalPaginas: Math.ceil(countResult.result / limite),
       incluirTotal: true,
       modoPaginacion: 'offset',
       cursorActual: null,
       nextCursor: null,
     };
+
+    this.logSlowRequest({
+      startedAt,
+      dataDurationMs: dataResult.durationMs,
+      countDurationMs: countResult.durationMs,
+      limite,
+      incluirTotal: true,
+      rows: response.data.length,
+      filters,
+      modoPaginacion: 'offset',
+      querySnapshots,
+    });
+
+    return response;
   }
 
   private async findAllByCursor(
     dto: PaginacionDto,
     limite: number,
     incluirTotal: boolean,
-  ): Promise<PaginacionResponseDto<CuotasVencidasRow>> {
+    startedAt: number,
+    filters: number,
+  ): Promise<CuotasVencidasResponse> {
     const baseQb = this.repo.createQueryBuilder('v');
     this.applyFilters(baseQb, dto);
 
@@ -109,30 +262,58 @@ export class CuotasVencidasService {
       this.applyCursorFilter(dataQb, cursor);
     }
 
-    const dataPromise = this.applyOrder(dataQb)
-      .take(limite + 1)
-      .getRawMany<CuotasVencidasRow>();
-    const totalPromise = incluirTotal ? baseQb.clone().getCount() : Promise.resolve(null);
+    const pagedDataQb = this.applyOrder(dataQb).take(limite + 1);
+    const querySnapshots: QueryDebugSnapshot[] = [
+      this.captureQuery('data', pagedDataQb),
+    ];
+    const countQb = incluirTotal ? baseQb.clone() : null;
+    if (countQb) {
+      querySnapshots.unshift(this.captureQuery('count', countQb));
+    }
 
-    const [total, rows] = await Promise.all([totalPromise, dataPromise]);
-    const tieneMas = rows.length > limite;
-    const data = rows.slice(0, limite);
+    const dataPromise = measureAsync(() =>
+      pagedDataQb.getRawMany<CuotasVencidasRow>(),
+    );
+    const totalPromise = incluirTotal
+      ? measureAsync(() => countQb!.getCount())
+      : Promise.resolve(null);
+
+    const [countResult, dataResult] = await Promise.all([totalPromise, dataPromise]);
+    const tieneMas = dataResult.result.length > limite;
+    const data = dataResult.result.slice(0, limite);
     const lastItem = data[data.length - 1];
     const nextCursor = tieneMas && lastItem ? this.encodeCursor(lastItem) : null;
 
-    return {
+    const response: CuotasVencidasResponse = {
       data,
-      total,
+      total: countResult?.result ?? null,
       limite,
       offset: null,
       pagina: null,
-      totalPaginas: total !== null ? Math.ceil(total / limite) : null,
+      totalPaginas:
+        countResult?.result !== undefined
+          ? Math.ceil(countResult.result / limite)
+          : null,
       incluirTotal,
       modoPaginacion: 'cursor',
       cursorActual: dto.cursor ?? null,
       nextCursor,
       tieneMas,
     };
+
+    this.logSlowRequest({
+      startedAt,
+      dataDurationMs: dataResult.durationMs,
+      countDurationMs: countResult?.durationMs ?? null,
+      limite,
+      incluirTotal,
+      rows: response.data.length,
+      filters,
+      modoPaginacion: 'cursor',
+      querySnapshots,
+    });
+
+    return response;
   }
 
   private applyFilters(
@@ -249,11 +430,9 @@ export class CuotasVencidasService {
   }
 
   private applyOrder(qb: SelectQueryBuilder<CuotasVencidasEntity>) {
-    const moraExpr = 'NVL(v.mesesMora, -1)';
-
     return qb
-      .orderBy(moraExpr, 'DESC')
-      .addOrderBy("NVL(v.fechaVencimiento, DATE '9999-12-31')", 'ASC')
+      .orderBy('v.mesesMora', 'DESC', 'NULLS LAST')
+      .addOrderBy('v.fechaVencimiento', 'ASC', 'NULLS LAST')
       .addOrderBy('v.numeroContrato', 'ASC')
       .addOrderBy('v.numeroCuota', 'ASC');
   }
@@ -390,6 +569,52 @@ export class CuotasVencidasService {
     }
 
     return mora;
+  }
+
+  private logSlowRequest(input: {
+    startedAt: number;
+    dataDurationMs: number;
+    countDurationMs: number | null;
+    limite: number;
+    incluirTotal: boolean;
+    rows: number;
+    filters: number;
+    modoPaginacion: 'cursor' | 'offset';
+    querySnapshots?: QueryDebugSnapshot[];
+  }) {
+    const totalDurationMs = Date.now() - input.startedAt;
+    const isFast =
+      totalDurationMs < 1000 &&
+      input.dataDurationMs < 1000 &&
+      (input.countDurationMs === null || input.countDurationMs < 1000);
+
+    if (isFast) {
+      return;
+    }
+
+    this.logger.warn(
+      `findAll cuotas-vencidas lento total=${totalDurationMs}ms data=${input.dataDurationMs}ms count=${input.countDurationMs ?? 0}ms limite=${input.limite} incluirTotal=${input.incluirTotal} rows=${input.rows} filters=${input.filters} modo=${input.modoPaginacion}`,
+    );
+
+    if (this.logSlowSql && input.querySnapshots?.length) {
+      for (const snapshot of input.querySnapshots) {
+        this.logger.warn(
+          `slow-sql cuotas-vencidas ${snapshot.label} sql=${snapshot.sql} params=${JSON.stringify(snapshot.parameters)}`,
+        );
+      }
+    }
+  }
+
+  private captureQuery(
+    label: string,
+    qb: SelectQueryBuilder<CuotasVencidasEntity>,
+  ): QueryDebugSnapshot {
+    const [sql, parameters] = qb.getQueryAndParameters();
+    return {
+      label,
+      sql: sql.replace(/\s+/g, ' ').trim(),
+      parameters,
+    };
   }
 }
 

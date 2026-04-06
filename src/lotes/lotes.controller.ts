@@ -43,7 +43,7 @@ export class LotesController {
    *   fechaUltimoPagoDesde/Hasta filtrar FECHA_ULTIMO_PAGO
    *   fechaIncripcionMunicDesde/Hasta filtrar FECHA_INCRIPCION_MUNIC
    *   fechaVentaDesde/Hasta filtrar FECHA_VENTA
-   *   incluirTotal         true|false (si es false evita COUNT(*) para responder más rápido)
+   *   incluirTotal         true|false (default: false para evitar COUNT(*) en vistas grandes)
    *
    * Ejemplos:
    *   GET /lotes?limite=100&offset=0

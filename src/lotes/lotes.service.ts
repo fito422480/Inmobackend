@@ -1,65 +1,169 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
 import { PaginacionDto, PaginacionResponseDto } from './lotes.dto';
 import { LotesEntity } from './lotes.entity';
+import {
+  captureQuerySnapshot,
+  QueryDebugSnapshot,
+} from '../common/query-performance.util';
+
+type LotesResponse = PaginacionResponseDto<LotesEntity>;
+type CacheEntry = {
+  expiresAt: number;
+  value: LotesResponse;
+};
 
 @Injectable()
 export class LotesService {
+  private readonly logger = new Logger(LotesService.name);
+  private readonly cache = new Map<string, CacheEntry>();
+  private readonly inFlight = new Map<string, Promise<LotesResponse>>();
+  private readonly cacheTtlMs: number;
+  private readonly cacheMaxItems: number;
+  private readonly logSlowSql: boolean;
+
   constructor(
     @InjectRepository(LotesEntity)
     private repo: Repository<LotesEntity>,
-  ) {}
+    private configService: ConfigService,
+  ) {
+    this.cacheTtlMs = this.parsePositiveNumber(
+      this.configService.get('LOTES_CACHE_TTL_MS'),
+      15000,
+    );
+    this.cacheMaxItems = this.parsePositiveNumber(
+      this.configService.get('LOTES_CACHE_MAX_ITEMS'),
+      200,
+    );
+    this.logSlowSql = this.configService.get('LOG_SLOW_SQL') === 'true';
+  }
 
-  async findAll(
-    dto: PaginacionDto,
-  ): Promise<PaginacionResponseDto<LotesEntity>> {
+  async findAll(dto: PaginacionDto): Promise<LotesResponse> {
+    const startedAt = Date.now();
     const limite = Math.min(Math.max(dto.limite || 100, 1), 1000);
     const offset = Math.max(dto.offset || 0, 0);
-    const incluirTotal = dto.incluirTotal !== false;
+    const incluirTotal = dto.incluirTotal === true;
     const pagina = Math.floor(offset / limite) + 1;
+    const normalizedDto: PaginacionDto = {
+      ...dto,
+      limite,
+      offset,
+      incluirTotal,
+    };
 
-    const qb = this.repo.createQueryBuilder('v');
-    this.applyFilters(qb, dto);
-    const dataQb = this.selectDataColumns(qb.clone());
+    const cacheKey = this.buildCacheKey(normalizedDto);
+    const cached = this.getCache(cacheKey);
+    if (cached) {
+      this.logger.debug(
+        `cache hit lotes limite=${limite} offset=${offset} incluirTotal=${incluirTotal}`,
+      );
+      return cached;
+    }
 
-    if (!incluirTotal) {
-      const data = await this.applyOrder(dataQb)
+    const pending = this.inFlight.get(cacheKey);
+    if (pending) {
+      this.logger.debug(
+        `cache join lotes limite=${limite} offset=${offset} incluirTotal=${incluirTotal}`,
+      );
+      return pending;
+    }
+
+    const loadPromise = (async () => {
+      const qb = this.repo.createQueryBuilder('v');
+      this.applyFilters(qb, normalizedDto);
+      const dataQb = this.selectDataColumns(qb.clone());
+
+      if (!incluirTotal) {
+        const pagedDataQb = this.applyOrder(dataQb)
+          .skip(offset)
+          .take(limite + 1);
+        const querySnapshots = [
+          captureQuerySnapshot('data', pagedDataQb),
+        ] as QueryDebugSnapshot[];
+        const dataStartedAt = Date.now();
+        const data = await pagedDataQb.getRawMany<LotesEntity>();
+        const dataDurationMs = Date.now() - dataStartedAt;
+
+        const tieneMas = data.length > limite;
+        const response: LotesResponse = {
+          data: data.slice(0, limite),
+          total: null,
+          limite,
+          offset,
+          pagina,
+          totalPaginas: null,
+          incluirTotal: false,
+          tieneMas,
+        };
+
+        this.setCache(cacheKey, response);
+        this.logSlowRequest({
+          startedAt,
+          dataDurationMs,
+          countDurationMs: null,
+          limite,
+          offset,
+          incluirTotal: false,
+          rows: response.data.length,
+          filters: this.countActiveFilters(normalizedDto),
+          querySnapshots,
+        });
+
+        return response;
+      }
+
+      const countQb = qb.clone();
+      const pagedDataQb = this.applyOrder(this.selectDataColumns(qb.clone()))
         .skip(offset)
-        .take(limite + 1)
-        .getRawMany<LotesEntity>();
+        .take(limite);
+      const querySnapshots = [
+        captureQuerySnapshot('count', countQb),
+        captureQuerySnapshot('data', pagedDataQb),
+      ] as QueryDebugSnapshot[];
 
-      const tieneMas = data.length > limite;
+      const [countResult, dataResult] = await Promise.all([
+        this.measureAsync(() => countQb.getCount()),
+        this.measureAsync(() => pagedDataQb.getRawMany<LotesEntity>()),
+      ]);
+      const total = countResult.result;
+      const data = dataResult.result;
 
-      return {
-        data: data.slice(0, limite),
-        total: null,
+      const response: LotesResponse = {
+        data,
+        total,
         limite,
         offset,
         pagina,
-        totalPaginas: null,
-        incluirTotal: false,
-        tieneMas,
+        totalPaginas: Math.ceil(total / limite),
+        incluirTotal: true,
       };
+
+      this.setCache(cacheKey, response);
+      this.logSlowRequest({
+        startedAt,
+        dataDurationMs: dataResult.durationMs,
+        countDurationMs: countResult.durationMs,
+        limite,
+        offset,
+        incluirTotal: true,
+        rows: response.data.length,
+        filters: this.countActiveFilters(normalizedDto),
+        querySnapshots,
+      });
+
+      return response;
+    })();
+
+    this.inFlight.set(cacheKey, loadPromise);
+    try {
+      return await loadPromise;
+    } finally {
+      if (this.inFlight.get(cacheKey) === loadPromise) {
+        this.inFlight.delete(cacheKey);
+      }
     }
-
-    const [total, data] = await Promise.all([
-      qb.clone().getCount(),
-      this.applyOrder(this.selectDataColumns(qb.clone()))
-        .skip(offset)
-        .take(limite)
-        .getRawMany<LotesEntity>(),
-    ]);
-
-    return {
-      data,
-      total,
-      limite,
-      offset,
-      pagina,
-      totalPaginas: Math.ceil(total / limite),
-      incluirTotal: true,
-    };
   }
 
   private applyFilters(qb: SelectQueryBuilder<LotesEntity>, dto: PaginacionDto) {
@@ -397,5 +501,121 @@ export class LotesService {
       .addSelect('v.pais', 'pais')
       .addSelect('v.clienteObservacion', 'clienteObservacion')
       .addSelect('v.localidad', 'localidad');
+  }
+
+  private getCache(key: string): LotesResponse | null {
+    const entry = this.cache.get(key);
+    if (!entry) {
+      return null;
+    }
+
+    if (entry.expiresAt <= Date.now()) {
+      this.cache.delete(key);
+      return null;
+    }
+
+    return entry.value;
+  }
+
+  private setCache(key: string, value: LotesResponse) {
+    if (this.cacheTtlMs <= 0) {
+      return;
+    }
+
+    this.pruneCache();
+    this.cache.set(key, {
+      expiresAt: Date.now() + this.cacheTtlMs,
+      value,
+    });
+  }
+
+  private pruneCache() {
+    const now = Date.now();
+    for (const [key, entry] of this.cache.entries()) {
+      if (entry.expiresAt <= now) {
+        this.cache.delete(key);
+      }
+    }
+
+    while (this.cache.size >= this.cacheMaxItems) {
+      const firstKey = this.cache.keys().next().value;
+      if (!firstKey) {
+        break;
+      }
+      this.cache.delete(firstKey);
+    }
+  }
+
+  private buildCacheKey(dto: PaginacionDto): string {
+    return JSON.stringify(
+      Object.keys(dto)
+        .sort()
+        .reduce<Record<string, unknown>>((acc, key) => {
+          const value = dto[key as keyof PaginacionDto];
+          if (value !== undefined) {
+            acc[key] = value;
+          }
+          return acc;
+        }, {}),
+    );
+  }
+
+  private countActiveFilters(dto: PaginacionDto): number {
+    return Object.entries(dto).filter(([key, value]) => {
+      return (
+        !['limite', 'offset', 'incluirTotal'].includes(key) &&
+        value !== undefined &&
+        value !== ''
+      );
+    }).length;
+  }
+
+  private async measureAsync<T>(
+    fn: () => Promise<T>,
+  ): Promise<{ result: T; durationMs: number }> {
+    const startedAt = Date.now();
+    const result = await fn();
+    return {
+      result,
+      durationMs: Date.now() - startedAt,
+    };
+  }
+
+  private logSlowRequest(input: {
+    startedAt: number;
+    dataDurationMs: number;
+    countDurationMs: number | null;
+    limite: number;
+    offset: number;
+    incluirTotal: boolean;
+    rows: number;
+    filters: number;
+    querySnapshots?: QueryDebugSnapshot[];
+  }) {
+    const totalDurationMs = Date.now() - input.startedAt;
+    if (
+      totalDurationMs < 1000 &&
+      input.dataDurationMs < 1000 &&
+      (input.countDurationMs === null || input.countDurationMs < 1000)
+    ) {
+      return;
+    }
+
+    this.logger.warn(
+      `findAll lotes lento total=${totalDurationMs}ms data=${input.dataDurationMs}ms count=${input.countDurationMs ?? 0}ms limite=${input.limite} offset=${input.offset} incluirTotal=${input.incluirTotal} rows=${input.rows} filters=${input.filters}`,
+    );
+
+    if (this.logSlowSql && input.querySnapshots?.length) {
+      for (const snapshot of input.querySnapshots) {
+        this.logger.warn(
+          `slow-sql lotes ${snapshot.label} sql=${snapshot.sql} params=${JSON.stringify(snapshot.parameters)}`,
+        );
+      }
+    }
+  }
+
+  private parsePositiveNumber(value: unknown, fallback: number): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
   }
 }

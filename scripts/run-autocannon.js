@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const autocannon = require('autocannon');
 
 const args = process.argv.slice(2);
@@ -8,6 +10,8 @@ const PRESETS = {
   cuotasPagadas: '/cuotas-pagadas?limite=100&offset=0&incluirTotal=false',
   cuotasVencidas: '/cuotas-vencidas?limit=100&incluirTotal=false',
 };
+
+loadEnvFile();
 
 function getOption(name, fallback) {
   const prefix = `${name}=`;
@@ -59,6 +63,7 @@ Opciones:
   --base-url=http://127.0.0.1:3000
   --connections=20
   --duration=30
+  --timeout=60
   --pipelining=1
   --api-key=tu_api_key
 
@@ -68,8 +73,70 @@ Variables de entorno:
   BENCH_BASE_URL
   BENCH_CONNECTIONS
   BENCH_DURATION
+  BENCH_TIMEOUT
   BENCH_PIPELINING
 `);
+}
+
+function loadEnvFile() {
+  const envPath = path.resolve(process.cwd(), '.env');
+  if (!fs.existsSync(envPath)) {
+    return;
+  }
+
+  const content = fs.readFileSync(envPath, 'utf8');
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) {
+      continue;
+    }
+
+    const separatorIndex = line.indexOf('=');
+    if (separatorIndex === -1) {
+      continue;
+    }
+
+    const key = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+
+    if (key && process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+}
+
+async function preflight(url, headers) {
+  const startedAt = Date.now();
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers,
+    });
+    const durationMs = Date.now() - startedAt;
+
+    console.log(
+      `[autocannon] preflight -> ${response.status} en ${durationMs}ms`,
+    );
+
+    if (response.status === 401) {
+      console.error(
+        '[autocannon] La API respondió 401. Revisa x-api-key o carga API_KEY en .env.',
+      );
+      process.exit(1);
+    }
+
+    if (response.status >= 500) {
+      console.warn(
+        `[autocannon] La API respondió ${response.status} en la prueba previa. El benchmark seguirá, pero el backend ya está fallando.`,
+      );
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      `[autocannon] No se pudo conectar a ${url}. Levanta la API primero. Detalle: ${message}`,
+    );
+    process.exit(1);
+  }
 }
 
 async function main() {
@@ -106,6 +173,10 @@ async function main() {
     getOption('--duration', process.env.BENCH_DURATION),
     30,
   );
+  const timeout = parsePositiveNumber(
+    getOption('--timeout', process.env.BENCH_TIMEOUT),
+    60,
+  );
   const pipelining = parsePositiveNumber(
     getOption('--pipelining', process.env.BENCH_PIPELINING),
     1,
@@ -118,7 +189,7 @@ async function main() {
 
   console.log(`\n[autocannon] URL: ${url}`);
   console.log(
-    `[autocannon] connections=${connections} duration=${duration}s pipelining=${pipelining}`,
+    `[autocannon] connections=${connections} duration=${duration}s timeout=${timeout}s pipelining=${pipelining}`,
   );
   if (headers['x-api-key']) {
     console.log('[autocannon] usando header x-api-key');
@@ -126,10 +197,13 @@ async function main() {
     console.log('[autocannon] sin x-api-key');
   }
 
+  await preflight(url, headers);
+
   const instance = autocannon({
     url,
     connections,
     duration,
+    timeout,
     pipelining,
     headers,
   });
@@ -159,6 +233,16 @@ async function main() {
         2,
       ),
     );
+
+    if (
+      result.timeouts > 0 &&
+      result.requests.average === 0 &&
+      result.throughput.average === 0
+    ) {
+      console.log(
+        '[autocannon] Todas o casi todas las requests expiraron antes de responder. Prueba con --timeout=120 y menos concurrencia, por ejemplo --connections=5.',
+      );
+    }
   });
 }
 

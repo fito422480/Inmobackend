@@ -69,8 +69,20 @@ Si querés conectarte sin SSH, configurá `SSH_ENABLED=false` y apuntá `ORA_HOS
 | `ORA_USER` | `XXXXXXXX` |
 | `ORA_PASSWORD` | `tu_password_oracle` |
 | `ORA_CLIENT_LIB_DIR` | `C:\oracle\instantclient` |
+| `ORA_POOL_MIN` | `2` |
+| `ORA_POOL_MAX` | `10` |
+| `ORA_POOL_INCREMENT` | `1` |
 | `APP_PORT` | `3000` |
 | `API_KEY` | `clave-larga-y-segura` |
+| `LOG_SLOW_SQL` | `false` |
+| `CLIENTES_CACHE_TTL_MS` | `15000` |
+| `CLIENTES_CACHE_MAX_ITEMS` | `200` |
+| `LOTES_CACHE_TTL_MS` | `15000` |
+| `LOTES_CACHE_MAX_ITEMS` | `200` |
+| `CUOTAS_PAGADAS_CACHE_TTL_MS` | `15000` |
+| `CUOTAS_PAGADAS_CACHE_MAX_ITEMS` | `200` |
+| `CUOTAS_VENCIDAS_CACHE_TTL_MS` | `15000` |
+| `CUOTAS_VENCIDAS_CACHE_MAX_ITEMS` | `200` |
 
 ## Seguridad
 
@@ -132,9 +144,11 @@ npm run bench:clientes
 npm run bench:lotes
 node scripts/run-autocannon.js cuotasVencidas --connections=50 --duration=60
 node scripts/run-autocannon.js /clientes?limite=100&offset=0 --connections=20 --duration=30
+node scripts/run-autocannon.js cuotasVencidas --connections=5 --duration=30 --timeout=120
 ```
 
 El runner usa `API_KEY` desde `.env` automáticamente para enviar `x-api-key`.
+También permite ajustar el timeout por request con `--timeout` o `BENCH_TIMEOUT`.
 
 Para profiling:
 
@@ -146,6 +160,7 @@ npm run profile:doctor:lotes
 Nota:
 - `clinic.js` es útil para diagnóstico, pero con Node 22 puede fallar o dar resultados inconsistentes.
 - Si eso pasa, conviene correr `clinic` con Node 20 LTS o usar `autocannon` junto con el profiler nativo de Node.
+- Si necesitas ver el SQL real de un request lento, activa `LOG_SLOW_SQL=true` en `.env` y revisa los logs del backend en `/clientes`, `/lotes`, `/cuotas-pagadas` y `/cuotas-vencidas`.
 
 ## Cache y diferidos
 
@@ -155,6 +170,18 @@ Recomendación práctica:
 - usar BullMQ solo para trabajo que no deba ejecutarse dentro del request HTTP, por ejemplo exportaciones grandes, recomputación de reportes, sincronizaciones o procesos batch.
 
 En esta API, cache probablemente te dé más impacto inmediato que BullMQ porque hoy la carga principal parece ser lectura directa desde Oracle.
+
+Mejoras aplicadas en endpoints paginados (`/clientes`, `/lotes`, `/cuotas-pagadas`, `/cuotas-vencidas`):
+
+- `incluirTotal` queda desactivado por defecto para evitar `COUNT(*)` en cada request;
+- hay cache TTL corto en memoria para requests repetidas con los mismos filtros;
+- las requests idénticas simultáneas comparten la misma consulta en vuelo para evitar trabajo duplicado;
+- se registran timings lentos tanto a nivel request como a nivel servicio.
+
+Pool Oracle:
+
+- el pool de TypeORM ahora se configura por `ORA_POOL_MIN`, `ORA_POOL_MAX` y `ORA_POOL_INCREMENT`;
+- `GET /test-oracle` reutiliza el mismo pool de TypeORM en lugar de abrir un segundo pool adicional.
 
 ## Flujo de arranque
 

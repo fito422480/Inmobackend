@@ -51,7 +51,7 @@ export class ClientesController {
    *   fechaPrimeraVentaHasta filtrar FECHA_PRIMERA_VENTA <= (YYYY-MM-DD)
    *   fechaBajaDesde      filtrar FECHA_BAJA >= (YYYY-MM-DD)
    *   fechaBajaHasta      filtrar FECHA_BAJA <= (YYYY-MM-DD)
-   *   incluirTotal        true|false (si es false evita COUNT(*) para responder más rápido)
+   *   incluirTotal        true|false (default: false para evitar COUNT(*) en vistas grandes)
    *
    * Ejemplos:
    *   GET /clientes?limite=100&offset=0

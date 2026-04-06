@@ -3,7 +3,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { TunnelService } from '../tunnel/tunnel.service';
 import { TunnelModule } from '../tunnel/tunnel.module';
-import { DatabaseService } from './database.service';
 
 @Module({
   imports: [
@@ -17,6 +16,12 @@ import { DatabaseService } from './database.service';
         const databaseHost = tunnel.getDatabaseHost();
         const databasePort = tunnel.getDatabasePort();
         const oracleClientLibDir = config.get<string>('ORA_CLIENT_LIB_DIR');
+        const poolMin = parsePositiveNumber(config.get('ORA_POOL_MIN'), 2);
+        const poolMax = parsePositiveNumber(config.get('ORA_POOL_MAX'), 10);
+        const poolIncrement = parsePositiveNumber(
+          config.get('ORA_POOL_INCREMENT'),
+          1,
+        );
 
         return {
           type: 'oracle',
@@ -33,14 +38,19 @@ import { DatabaseService } from './database.service';
           synchronize: false,   //NUNCA en true con Oracle en producción
           logging: config.get('NODE_ENV') !== 'production',
           extra: {
-            poolMin: 2,
-            poolMax: 10,
+            poolMin,
+            poolMax,
+            poolIncrement,
           },
         };
       },
     }),
   ],
-  providers: [DatabaseService],
-  exports: [TypeOrmModule, DatabaseService],
+  exports: [TypeOrmModule],
 })
 export class DatabaseModule {}
+
+function parsePositiveNumber(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}

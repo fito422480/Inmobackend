@@ -1,65 +1,194 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
 import { PaginacionDto, PaginacionResponseDto } from './clientes.dto';
 import { ClientesEntity } from './clientes.entity';
+import {
+  CacheEntry,
+  buildStableCacheKey,
+  captureQuerySnapshot,
+  countActiveFilters,
+  getCacheValue,
+  measureAsync,
+  parsePositiveNumber,
+  QueryDebugSnapshot,
+  setCacheValue,
+} from '../common/query-performance.util';
+
+type ClientesResponse = PaginacionResponseDto<ClientesEntity>;
 
 @Injectable()
 export class ClientesService {
+  private readonly logger = new Logger(ClientesService.name);
+  private readonly cache = new Map<string, CacheEntry<ClientesResponse>>();
+  private readonly inFlight = new Map<string, Promise<ClientesResponse>>();
+  private readonly cacheTtlMs: number;
+  private readonly cacheMaxItems: number;
+  private readonly logSlowSql: boolean;
+
   constructor(
     @InjectRepository(ClientesEntity)
     private repo: Repository<ClientesEntity>,
-  ) {}
+    private configService: ConfigService,
+  ) {
+    this.cacheTtlMs = parsePositiveNumber(
+      this.configService.get('CLIENTES_CACHE_TTL_MS'),
+      15000,
+    );
+    this.cacheMaxItems = parsePositiveNumber(
+      this.configService.get('CLIENTES_CACHE_MAX_ITEMS'),
+      200,
+    );
+    this.logSlowSql = this.configService.get('LOG_SLOW_SQL') === 'true';
+  }
 
-  async findAll(
-    dto: PaginacionDto,
-  ): Promise<PaginacionResponseDto<ClientesEntity>> {
+  async findAll(dto: PaginacionDto): Promise<ClientesResponse> {
+    const startedAt = Date.now();
     const limite = Math.min(Math.max(dto.limite || 100, 1), 1000);
     const offset = Math.max(dto.offset || 0, 0);
-    const incluirTotal = dto.incluirTotal !== false;
+    const incluirTotal = dto.incluirTotal === true;
     const pagina = Math.floor(offset / limite) + 1;
+    const normalizedDto: PaginacionDto = {
+      ...dto,
+      limite,
+      offset,
+      incluirTotal,
+    };
+    const normalizedDtoRecord = normalizedDto as unknown as Record<
+      string,
+      unknown
+    >;
 
-    const qb = this.repo.createQueryBuilder('v');
-    this.applyFilters(qb, dto);
-    const dataQb = this.selectDataColumns(qb.clone());
+    const cacheKey = buildStableCacheKey(normalizedDtoRecord);
+    const cached = getCacheValue(this.cache, cacheKey);
+    if (cached) {
+      this.logger.debug(
+        `cache hit clientes limite=${limite} offset=${offset} incluirTotal=${incluirTotal}`,
+      );
+      return cached;
+    }
 
-    if (!incluirTotal) {
-      const data = await this.applyOrder(dataQb)
+    const pending = this.inFlight.get(cacheKey);
+    if (pending) {
+      this.logger.debug(
+        `cache join clientes limite=${limite} offset=${offset} incluirTotal=${incluirTotal}`,
+      );
+      return pending;
+    }
+
+    const loadPromise = (async () => {
+      const qb = this.repo.createQueryBuilder('v');
+      this.applyFilters(qb, normalizedDto);
+      const dataQb = this.selectDataColumns(qb.clone());
+
+      if (!incluirTotal) {
+        const pagedDataQb = this.applyOrder(dataQb)
+          .skip(offset)
+          .take(limite + 1);
+        const querySnapshots = [
+          captureQuerySnapshot('data', pagedDataQb),
+        ] as QueryDebugSnapshot[];
+        const dataResult = await measureAsync(() =>
+          pagedDataQb.getRawMany<ClientesEntity>(),
+        );
+
+        const tieneMas = dataResult.result.length > limite;
+        const response: ClientesResponse = {
+          data: dataResult.result.slice(0, limite),
+          total: null,
+          limite,
+          offset,
+          pagina,
+          totalPaginas: null,
+          incluirTotal: false,
+          tieneMas,
+        };
+
+        setCacheValue(
+          this.cache,
+          cacheKey,
+          response,
+          this.cacheTtlMs,
+          this.cacheMaxItems,
+        );
+        this.logSlowRequest({
+          startedAt,
+          dataDurationMs: dataResult.durationMs,
+          countDurationMs: null,
+          limite,
+          offset,
+          incluirTotal: false,
+          rows: response.data.length,
+          filters: countActiveFilters(normalizedDtoRecord, [
+            'limite',
+            'offset',
+            'incluirTotal',
+          ]),
+          querySnapshots,
+        });
+
+        return response;
+      }
+
+      const countQb = qb.clone();
+      const pagedDataQb = this.applyOrder(this.selectDataColumns(qb.clone()))
         .skip(offset)
-        .take(limite + 1)
-        .getRawMany<ClientesEntity>();
+        .take(limite);
+      const querySnapshots = [
+        captureQuerySnapshot('count', countQb),
+        captureQuerySnapshot('data', pagedDataQb),
+      ] as QueryDebugSnapshot[];
 
-      const tieneMas = data.length > limite;
+      const [countResult, dataResult] = await Promise.all([
+        measureAsync(() => countQb.getCount()),
+        measureAsync(() => pagedDataQb.getRawMany<ClientesEntity>()),
+      ]);
 
-      return {
-        data: data.slice(0, limite),
-        total: null,
+      const response: ClientesResponse = {
+        data: dataResult.result,
+        total: countResult.result,
         limite,
         offset,
         pagina,
-        totalPaginas: null,
-        incluirTotal: false,
-        tieneMas,
+        totalPaginas: Math.ceil(countResult.result / limite),
+        incluirTotal: true,
       };
+
+      setCacheValue(
+        this.cache,
+        cacheKey,
+        response,
+        this.cacheTtlMs,
+        this.cacheMaxItems,
+      );
+      this.logSlowRequest({
+        startedAt,
+        dataDurationMs: dataResult.durationMs,
+        countDurationMs: countResult.durationMs,
+        limite,
+        offset,
+        incluirTotal: true,
+        rows: response.data.length,
+        filters: countActiveFilters(normalizedDtoRecord, [
+          'limite',
+          'offset',
+          'incluirTotal',
+        ]),
+        querySnapshots,
+      });
+
+      return response;
+    })();
+
+    this.inFlight.set(cacheKey, loadPromise);
+    try {
+      return await loadPromise;
+    } finally {
+      if (this.inFlight.get(cacheKey) === loadPromise) {
+        this.inFlight.delete(cacheKey);
+      }
     }
-
-    const [total, data] = await Promise.all([
-      qb.clone().getCount(),
-      this.applyOrder(this.selectDataColumns(qb.clone()))
-        .skip(offset)
-        .take(limite)
-        .getRawMany<ClientesEntity>(),
-    ]);
-
-    return {
-      data,
-      total,
-      limite,
-      offset,
-      pagina,
-      totalPaginas: Math.ceil(total / limite),
-      incluirTotal: true,
-    };
   }
 
   private applyFilters(
@@ -345,5 +474,38 @@ export class ClientesService {
       .addSelect('v.refinanciacion', 'refinanciacion')
       .addSelect('v.mesesAtraso', 'mesesAtraso')
       .addSelect('v.montoCuota', 'montoCuota');
+  }
+
+  private logSlowRequest(input: {
+    startedAt: number;
+    dataDurationMs: number;
+    countDurationMs: number | null;
+    limite: number;
+    offset: number;
+    incluirTotal: boolean;
+    rows: number;
+    filters: number;
+    querySnapshots?: QueryDebugSnapshot[];
+  }) {
+    const totalDurationMs = Date.now() - input.startedAt;
+    if (
+      totalDurationMs < 1000 &&
+      input.dataDurationMs < 1000 &&
+      (input.countDurationMs === null || input.countDurationMs < 1000)
+    ) {
+      return;
+    }
+
+    this.logger.warn(
+      `findAll clientes lento total=${totalDurationMs}ms data=${input.dataDurationMs}ms count=${input.countDurationMs ?? 0}ms limite=${input.limite} offset=${input.offset} incluirTotal=${input.incluirTotal} rows=${input.rows} filters=${input.filters}`,
+    );
+
+    if (this.logSlowSql && input.querySnapshots?.length) {
+      for (const snapshot of input.querySnapshots) {
+        this.logger.warn(
+          `slow-sql clientes ${snapshot.label} sql=${snapshot.sql} params=${JSON.stringify(snapshot.parameters)}`,
+        );
+      }
+    }
   }
 }
