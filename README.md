@@ -53,6 +53,13 @@ Luego completá las credenciales reales.
 
 Si querés conectarte sin SSH, configurá `SSH_ENABLED=false` y apuntá `ORA_HOST`/`ORA_PORT` al host y puerto directos de Oracle.
 
+En producción:
+
+- `APP_HOST=0.0.0.0` permite exponer la app correctamente en Docker o detrás de balanceadores.
+- `TRUST_PROXY=true` solo si estás detrás de proxy reverso o CDN.
+- `CORS_ORIGINS` acepta una lista separada por comas.
+- `CORS_CREDENTIALS=true` solo si realmente usas cookies o sesión.
+
 ### Variables de entorno
 
 | Variable | Ejemplo |
@@ -73,6 +80,10 @@ Si querés conectarte sin SSH, configurá `SSH_ENABLED=false` y apuntá `ORA_HOS
 | `ORA_POOL_MAX` | `10` |
 | `ORA_POOL_INCREMENT` | `1` |
 | `APP_PORT` | `3000` |
+| `APP_HOST` | `0.0.0.0` |
+| `TRUST_PROXY` | `false` |
+| `CORS_ORIGINS` | `https://app.midominio.com,https://admin.midominio.com` |
+| `CORS_CREDENTIALS` | `false` |
 | `API_KEY` | `clave-larga-y-segura` |
 | `LOG_SLOW_SQL` | `false` |
 | `CLIENTES_CACHE_TTL_MS` | `15000` |
