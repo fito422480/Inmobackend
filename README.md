@@ -1,6 +1,6 @@
 # Inmobackend
 
-Backend en NestJS para consultar Oracle con o sin túnel SSH, usando TypeORM y `node-oracledb` en `thick mode`.
+Backend en NestJS con adapter Fastify para consultar Oracle con o sin túnel SSH, usando TypeORM y `node-oracledb` en `thick mode`.
 
 ## Qué hace
 
@@ -8,16 +8,18 @@ Backend en NestJS para consultar Oracle con o sin túnel SSH, usando TypeORM y `
 - Si SSH está habilitado, expone Oracle localmente a través de ese túnel.
 - Espera a que la ruta de conexión esté lista antes de crear el pool de TypeORM.
 - Si el túnel SSH está habilitado y se cae, intenta reconectar.
-- Publica endpoints para consultar vistas Oracle como `cuotas-pagadas` y `cuotas-vencidas`.
+- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `cuotas-pagadas` y `cuotas-vencidas`.
 
 ## Stack
 
 - NestJS 11
+- Fastify
 - TypeORM 0.3
 - Oracle Database
 - `oracledb`
 - `tunnel-ssh`
 - TypeScript
+- Header `x-api-key` para proteger endpoints
 
 ## Requisitos
 
@@ -68,6 +70,19 @@ Si querés conectarte sin SSH, configurá `SSH_ENABLED=false` y apuntá `ORA_HOS
 | `ORA_PASSWORD` | `tu_password_oracle` |
 | `ORA_CLIENT_LIB_DIR` | `C:\oracle\instantclient` |
 | `APP_PORT` | `3000` |
+| `API_KEY` | `clave-larga-y-segura` |
+
+## Seguridad
+
+- `GET /` queda público como health-check simple.
+- El resto de los endpoints requieren enviar el header `x-api-key`.
+- La clave se toma desde `API_KEY` en el `.env`.
+
+Ejemplo:
+
+```bash
+curl -H "x-api-key: TU_API_KEY" http://localhost:3000/clientes?limite=10&offset=0
+```
 
 ## Ejecución local
 
@@ -99,6 +114,47 @@ npm start
 | `npm run start:dev` | Ejecuta el watcher con recompilación y reinicio automático |
 | `npm run start:prod` | Ejecuta `dist/main.js` |
 | `npm run start:tunnel` | Levanta la app y publica con `cloudflared` |
+| `npm run bench:clientes` | Ejecuta carga sobre `/clientes` con `autocannon` |
+| `npm run bench:lotes` | Ejecuta carga sobre `/lotes` con `autocannon` |
+| `npm run bench:cuotas-pagadas` | Ejecuta carga sobre `/cuotas-pagadas` |
+| `npm run bench:cuotas-vencidas` | Ejecuta carga sobre `/cuotas-vencidas` |
+| `npm run profile:doctor:clientes` | Perf profiling con `clinic doctor` sobre `/clientes` |
+| `npm run profile:doctor:lotes` | Perf profiling con `clinic doctor` sobre `/lotes` |
+
+## Medición de rendimiento
+
+La medición de carga rápida queda preparada con `autocannon` a través de `scripts/run-autocannon.js`.
+
+Ejemplos:
+
+```bash
+npm run bench:clientes
+npm run bench:lotes
+node scripts/run-autocannon.js cuotasVencidas --connections=50 --duration=60
+node scripts/run-autocannon.js /clientes?limite=100&offset=0 --connections=20 --duration=30
+```
+
+El runner usa `API_KEY` desde `.env` automáticamente para enviar `x-api-key`.
+
+Para profiling:
+
+```bash
+npm run profile:doctor:clientes
+npm run profile:doctor:lotes
+```
+
+Nota:
+- `clinic.js` es útil para diagnóstico, pero con Node 22 puede fallar o dar resultados inconsistentes.
+- Si eso pasa, conviene correr `clinic` con Node 20 LTS o usar `autocannon` junto con el profiler nativo de Node.
+
+## Cache y diferidos
+
+Recomendación práctica:
+
+- usar cache para lecturas repetidas con exactamente los mismos filtros, especialmente en `/clientes`, `/lotes`, `/cuotas-pagadas` y `/cuotas-vencidas`;
+- usar BullMQ solo para trabajo que no deba ejecutarse dentro del request HTTP, por ejemplo exportaciones grandes, recomputación de reportes, sincronizaciones o procesos batch.
+
+En esta API, cache probablemente te dé más impacto inmediato que BullMQ porque hoy la carga principal parece ser lectura directa desde Oracle.
 
 ## Flujo de arranque
 
@@ -140,6 +196,8 @@ docker compose down
 | `GET` | `/` | Estado simple del backend |
 | `GET` | `/test-oracle` | Ejecuta `SELECT SYSDATE AS fecha FROM DUAL` |
 
+Salvo `GET /`, todos los endpoints requieren `x-api-key`.
+
 ### Cuotas pagadas
 
 Ruta base:
@@ -168,6 +226,48 @@ Ejemplos:
 GET /cuotas-pagadas?limite=100&offset=0
 GET /cuotas-pagadas?limite=100&offset=0&incluirTotal=false
 GET /cuotas-pagadas?documento=1234567&limite=100&offset=0
+```
+
+### Lotes
+
+Ruta base:
+
+```text
+/lotes
+```
+
+Parámetros principales:
+
+- `limit` o `limite`
+- `offset`
+- `incluirTotal`
+- `idLote`
+- `idFraccion`
+- `idManzana`
+- `idCliente`
+- `numeroContrato`
+- `numeroTrato`
+- `numeroLote`
+- `cliente`
+- `docIdentCliente`
+- `estado`
+- `sucursal`
+- `vendedor`
+- `fechaContratoDesde`
+- `fechaContratoHasta`
+- `fechaUltimoPagoDesde`
+- `fechaUltimoPagoHasta`
+- `fechaVentaDesde`
+- `fechaVentaHasta`
+
+Ejemplos:
+
+```http
+GET /lotes?limite=100&offset=0
+GET /lotes?idLote=1234
+GET /lotes?numeroContrato=00012345&limite=50&offset=0
+GET /lotes?idFraccion=10&idManzana=4&sucursal=CDE&limite=100&offset=0
+GET /lotes?cliente=JUAN%20PEREZ&docIdentCliente=1234567&limite=20&offset=0
 ```
 
 ### Cuotas vencidas

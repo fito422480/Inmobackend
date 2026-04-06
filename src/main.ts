@@ -1,12 +1,21 @@
-import { NestFactory } from "@nestjs/core";
-import { AppModule } from "./app.module";
+import { NestFactory } from '@nestjs/core';
+import {
+  FastifyAdapter,
+  NestFastifyApplication,
+} from '@nestjs/platform-fastify';
+import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter(),
+  );
 
-  const port = process.env.APP_PORT || 3000;
-  await app.listen(port);
+  const port = Number(process.env.APP_PORT) || 3000;
+  await app.listen(port, '0.0.0.0');
+  const url = await app.getUrl();
 
-  console.log(`\nBackend corriendo en http://localhost:${port}`);
+  console.log(`\nBackend Fastify corriendo en ${url}`);
 }
+
 bootstrap();

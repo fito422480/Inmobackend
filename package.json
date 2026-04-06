@@ -4,7 +4,13 @@
   "description": "NestJS backend con tunnel SSH a Oracle",
   "scripts": {
     "build": "nest build",
+    "bench:clientes": "node scripts/run-autocannon.js clientes",
+    "bench:lotes": "node scripts/run-autocannon.js lotes",
+    "bench:cuotas-pagadas": "node scripts/run-autocannon.js cuotasPagadas",
+    "bench:cuotas-vencidas": "node scripts/run-autocannon.js cuotasVencidas",
     "prestart": "npm run build",
+    "profile:doctor:clientes": "npm run build && clinic doctor --name clientes-doctor --dest .clinic --on-port \"node scripts/run-autocannon.js clientes --base-url=http://127.0.0.1:$PORT\" -- node dist/main.js",
+    "profile:doctor:lotes": "npm run build && clinic doctor --name lotes-doctor --dest .clinic --on-port \"node scripts/run-autocannon.js lotes --base-url=http://127.0.0.1:$PORT\" -- node dist/main.js",
     "start": "node dist/main.js",
     "start:dev": "node dev-runner.js",
     "start:prod": "node dist/main.js",
@@ -16,6 +22,7 @@
     "@nestjs/config": "^4.0.3",
     "@nestjs/core": "^11.1.17",
     "@nestjs/platform-express": "^11.1.17",
+    "@nestjs/platform-fastify": "^11.1.18",
     "@nestjs/typeorm": "^11.0.0",
     "oracledb": "^6.4.0",
     "reflect-metadata": "^0.2.2",
@@ -26,6 +33,8 @@
   "devDependencies": {
     "@nestjs/cli": "^11.0.16",
     "@types/node": "^25.5.0",
+    "autocannon": "^8.0.0",
+    "clinic": "^13.0.0",
     "concurrently": "^9.2.1",
     "typescript": "^5.9.3"
   }
