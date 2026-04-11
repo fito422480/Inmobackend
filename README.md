@@ -8,7 +8,7 @@ Backend en NestJS con adapter Fastify para consultar Oracle con o sin túnel SSH
 - Si SSH está habilitado, expone Oracle localmente a través de ese túnel.
 - Espera a que la ruta de conexión esté lista antes de crear el pool de TypeORM.
 - Si el túnel SSH está habilitado y se cae, intenta reconectar.
-- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `cuotas-pagadas` y `cuotas-vencidas`.
+- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `cuotas-pagadas`, `cuotas-vencidas` y `cobranzas`.
 
 ## Stack
 
@@ -94,6 +94,8 @@ En producción:
 | `CUOTAS_PAGADAS_CACHE_MAX_ITEMS` | `200` |
 | `CUOTAS_VENCIDAS_CACHE_TTL_MS` | `15000` |
 | `CUOTAS_VENCIDAS_CACHE_MAX_ITEMS` | `200` |
+| `COBRANZAS_CACHE_TTL_MS` | `15000` |
+| `COBRANZAS_CACHE_MAX_ITEMS` | `200` |
 
 ## Seguridad
 
@@ -141,6 +143,8 @@ npm start
 | `npm run bench:lotes` | Ejecuta carga sobre `/lotes` con `autocannon` |
 | `npm run bench:cuotas-pagadas` | Ejecuta carga sobre `/cuotas-pagadas` |
 | `npm run bench:cuotas-vencidas` | Ejecuta carga sobre `/cuotas-vencidas` |
+| `npm run export:cobranzas` | Exporta `/cobranzas` a CSV recorriendo todas las páginas |
+| `npm run export:cuotas-vencidas` | Exporta `/cuotas-vencidas` a CSV recorriendo todas las páginas |
 | `npm run profile:doctor:clientes` | Perf profiling con `clinic doctor` sobre `/clientes` |
 | `npm run profile:doctor:lotes` | Perf profiling con `clinic doctor` sobre `/lotes` |
 
@@ -171,18 +175,18 @@ npm run profile:doctor:lotes
 Nota:
 - `clinic.js` es útil para diagnóstico, pero con Node 22 puede fallar o dar resultados inconsistentes.
 - Si eso pasa, conviene correr `clinic` con Node 20 LTS o usar `autocannon` junto con el profiler nativo de Node.
-- Si necesitas ver el SQL real de un request lento, activa `LOG_SLOW_SQL=true` en `.env` y revisa los logs del backend en `/clientes`, `/lotes`, `/cuotas-pagadas` y `/cuotas-vencidas`.
+- Si necesitas ver el SQL real de un request lento, activa `LOG_SLOW_SQL=true` en `.env` y revisa los logs del backend en `/clientes`, `/lotes`, `/cuotas-pagadas`, `/cuotas-vencidas` y `/cobranzas`.
 
 ## Cache y diferidos
 
 Recomendación práctica:
 
-- usar cache para lecturas repetidas con exactamente los mismos filtros, especialmente en `/clientes`, `/lotes`, `/cuotas-pagadas` y `/cuotas-vencidas`;
+- usar cache para lecturas repetidas con exactamente los mismos filtros, especialmente en `/clientes`, `/lotes`, `/cuotas-pagadas`, `/cuotas-vencidas` y `/cobranzas`;
 - usar BullMQ solo para trabajo que no deba ejecutarse dentro del request HTTP, por ejemplo exportaciones grandes, recomputación de reportes, sincronizaciones o procesos batch.
 
 En esta API, cache probablemente te dé más impacto inmediato que BullMQ porque hoy la carga principal parece ser lectura directa desde Oracle.
 
-Mejoras aplicadas en endpoints paginados (`/clientes`, `/lotes`, `/cuotas-pagadas`, `/cuotas-vencidas`):
+Mejoras aplicadas en endpoints paginados (`/clientes`, `/lotes`, `/cuotas-pagadas`, `/cuotas-vencidas`, `/cobranzas`):
 
 - `incluirTotal` queda desactivado por defecto para evitar `COUNT(*)` en cada request;
 - hay cache TTL corto en memoria para requests repetidas con los mismos filtros;
@@ -264,6 +268,69 @@ Ejemplos:
 GET /cuotas-pagadas?limite=100&offset=0
 GET /cuotas-pagadas?limite=100&offset=0&incluirTotal=false
 GET /cuotas-pagadas?documento=1234567&limite=100&offset=0
+```
+
+### Clientes
+
+Ruta base:
+
+```text
+/clientes
+```
+
+Parámetros principales:
+
+- `limit` o `limite`
+- `offset`
+- `incluirTotal`
+- `idPersona`
+- `documento`
+- `ruc`
+- `nombreCompleto`
+- `primerNombre`
+- `primerApellido`
+- `estado`
+- `estadoCivil`
+- `nacionalidad`
+- `sexo`
+- `tipoDocumento`
+- `barrio`
+- `sucursal`
+- `pais`
+- `profesion`
+- `departamento`
+- `distrito`
+- `localidad`
+- `numeroContrato`
+- `estadoContrato`
+- `vendedor`
+- `condominio`
+- `recuperado`
+- `refinanciacion`
+- `indCliente`
+- `indProveedor`
+- `indEmpleado`
+- `informconf`
+- `idLote`
+- `idFraccion`
+- `mesesAtrasoDesde`
+- `mesesAtrasoHasta`
+- `fechaIngresoDesde`
+- `fechaIngresoHasta`
+- `fechaNacimientoDesde`
+- `fechaNacimientoHasta`
+- `fechaPrimeraVentaDesde`
+- `fechaPrimeraVentaHasta`
+- `fechaBajaDesde`
+- `fechaBajaHasta`
+
+Ejemplos:
+
+```http
+GET /clientes?limite=100&offset=0
+GET /clientes?documento=1234567&limite=100&offset=0
+GET /clientes?numeroContrato=00012345&limite=100&offset=0
+GET /clientes?sucursal=CDE&estadoContrato=ACTIVO&limite=100&offset=0
 ```
 
 ### Lotes
@@ -376,9 +443,62 @@ Respuesta típica con cursor:
 }
 ```
 
+### Cobranzas
+
+Ruta base:
+
+```text
+/cobranzas
+```
+
+Parámetros principales:
+
+- `limit` o `limite`
+- `cursor`
+- `offset`
+- `incluirTotal`
+- `estado`
+- `mesesAtrasoDesde`
+- `mesesAtrasoHasta`
+
+Orden actual:
+
+- `mesesAtraso DESC`
+- `vencimiento ASC`
+- `contrato ASC`
+- `cuota ASC`
+
+Ejemplos:
+
+```http
+GET /cobranzas?limit=100
+GET /cobranzas?limit=100&cursor=<nextCursor>
+GET /cobranzas?estado=VENCIDO&limit=100
+GET /cobranzas?mesesAtrasoDesde=3&mesesAtrasoHasta=12&limit=100
+GET /cobranzas?incluirTotal=true&offset=0&limit=100
+```
+
+Respuesta típica con cursor:
+
+```json
+{
+  "data": [],
+  "total": null,
+  "limite": 100,
+  "offset": null,
+  "pagina": null,
+  "totalPaginas": null,
+  "incluirTotal": false,
+  "modoPaginacion": "cursor",
+  "cursorActual": null,
+  "nextCursor": "eyJtYSI6MywidiI6IjIwMjQtMDEtMDEgMDA6MDA6MDAiLCJjIjoiMDAwMTIzNDUiLCJxIjoxfQ",
+  "tieneMas": true
+}
+```
+
 ## Paginación y rendimiento
 
-`cuotas-pagadas` soporta paginación por `offset`. `cuotas-vencidas` ahora usa `cursor` como mecanismo recomendado y mantiene `offset` solo por compatibilidad.
+`clientes`, `lotes` y `cuotas-pagadas` soportan paginación por `offset`. `cuotas-vencidas` y `cobranzas` usan `cursor` como mecanismo recomendado y mantienen `offset` solo por compatibilidad.
 
 Recomendaciones:
 
@@ -386,7 +506,7 @@ Recomendaciones:
 - evitar `COUNT(*)` cuando no haga falta,
 - preferir `incluirTotal=false` en vistas grandes.
 
-En `cuotas-vencidas`, `incluirTotal` queda desactivado por defecto para responder más rápido en consultas grandes.
+En `cuotas-vencidas` y `cobranzas`, `incluirTotal` queda desactivado por defecto para responder más rápido en consultas grandes.
 
 ## Desarrollo de nuevos módulos
 

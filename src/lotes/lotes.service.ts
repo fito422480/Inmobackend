@@ -7,6 +7,7 @@ import { LotesEntity } from './lotes.entity';
 import {
   captureQuerySnapshot,
   QueryDebugSnapshot,
+  withOracleFirstRowsHint,
 } from '../common/query-performance.util';
 
 type LotesResponse = PaginacionResponseDto<LotesEntity>;
@@ -73,7 +74,7 @@ export class LotesService {
     const loadPromise = (async () => {
       const qb = this.repo.createQueryBuilder('v');
       this.applyFilters(qb, normalizedDto);
-      const dataQb = this.selectDataColumns(qb.clone());
+      const dataQb = this.selectDataColumns(qb.clone(), limite + 1);
 
       if (!incluirTotal) {
         const pagedDataQb = this.applyOrder(dataQb)
@@ -115,7 +116,9 @@ export class LotesService {
       }
 
       const countQb = qb.clone();
-      const pagedDataQb = this.applyOrder(this.selectDataColumns(qb.clone()))
+      const pagedDataQb = this.applyOrder(
+        this.selectDataColumns(qb.clone(), limite),
+      )
         .skip(offset)
         .take(limite);
       const querySnapshots = [
@@ -446,9 +449,15 @@ export class LotesService {
       .addOrderBy('v.idLote', 'ASC');
   }
 
-  private selectDataColumns(qb: SelectQueryBuilder<LotesEntity>) {
+  private selectDataColumns(
+    qb: SelectQueryBuilder<LotesEntity>,
+    firstRowsHint?: number,
+  ) {
     return qb
-      .select('v.idLote', 'idLote')
+      .select(
+        withOracleFirstRowsHint('v.idLote', firstRowsHint),
+        'idLote',
+      )
       .addSelect('v.idFraccion', 'idFraccion')
       .addSelect('v.idManzana', 'idManzana')
       .addSelect('v.idCliente', 'idCliente')

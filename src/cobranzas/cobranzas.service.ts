@@ -2,70 +2,59 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
-import { CuotasVencidasEntity } from './cuotas-vencidas.entity';
-import { PaginacionDto, PaginacionResponseDto } from './cuotas-vencidas.dto';
 import {
   CacheEntry,
   buildStableCacheKey,
+  captureQuerySnapshot,
   countActiveFilters,
   getCacheValue,
   measureAsync,
   parsePositiveNumber,
+  QueryDebugSnapshot,
   setCacheValue,
   withOracleFirstRowsHint,
 } from '../common/query-performance.util';
+import { PaginacionDto, PaginacionResponseDto } from './cobranzas.dto';
+import { CobranzasEntity } from './cobranzas.entity';
 
 type CursorPayload = {
-  mm: number | null;
-  fv: string | null;
-  nc: string;
-  nq: number;
+  ma: number | null;
+  v: string | null;
+  c: string;
+  q: number;
 };
 
-type CuotasVencidasRow = CuotasVencidasEntity;
-type CuotasVencidasResponse = PaginacionResponseDto<CuotasVencidasEntity>;
-type QueryDebugSnapshot = {
-  label: string;
-  sql: string;
-  parameters: unknown[];
-};
+type CobranzasRow = CobranzasEntity;
+type CobranzasResponse = PaginacionResponseDto<CobranzasEntity>;
 
 @Injectable()
-export class CuotasVencidasService {
+export class CobranzasService {
   private static readonly NULL_DATE_CURSOR = '9999-12-31 23:59:59';
-  private static readonly NULL_MORA_CURSOR = -1;
-  private readonly logger = new Logger(CuotasVencidasService.name);
-  private readonly cache = new Map<
-    string,
-    CacheEntry<CuotasVencidasResponse>
-  >();
-  private readonly inFlight = new Map<
-    string,
-    Promise<CuotasVencidasResponse>
-  >();
+  private static readonly NULL_MESES_ATRASO_CURSOR = -1;
+  private readonly logger = new Logger(CobranzasService.name);
+  private readonly cache = new Map<string, CacheEntry<CobranzasResponse>>();
+  private readonly inFlight = new Map<string, Promise<CobranzasResponse>>();
   private readonly cacheTtlMs: number;
   private readonly cacheMaxItems: number;
   private readonly logSlowSql: boolean;
 
   constructor(
-    @InjectRepository(CuotasVencidasEntity)
-    private repo: Repository<CuotasVencidasEntity>,
+    @InjectRepository(CobranzasEntity)
+    private repo: Repository<CobranzasEntity>,
     private configService: ConfigService,
   ) {
     this.cacheTtlMs = parsePositiveNumber(
-      this.configService.get('CUOTAS_VENCIDAS_CACHE_TTL_MS'),
+      this.configService.get('COBRANZAS_CACHE_TTL_MS'),
       15000,
     );
     this.cacheMaxItems = parsePositiveNumber(
-      this.configService.get('CUOTAS_VENCIDAS_CACHE_MAX_ITEMS'),
+      this.configService.get('COBRANZAS_CACHE_MAX_ITEMS'),
       200,
     );
     this.logSlowSql = this.configService.get('LOG_SLOW_SQL') === 'true';
   }
 
-  async findAll(
-    dto: PaginacionDto,
-  ): Promise<CuotasVencidasResponse> {
+  async findAll(dto: PaginacionDto): Promise<CobranzasResponse> {
     const startedAt = Date.now();
     const limite = Math.min(Math.max(dto.limite || 100, 1), 100000);
     const incluirTotal = dto.incluirTotal === true;
@@ -85,7 +74,7 @@ export class CuotasVencidasService {
     const cached = getCacheValue(this.cache, cacheKey);
     if (cached) {
       this.logger.debug(
-        `cache hit cuotas-vencidas modo=${normalizedDto.modoPaginacion} incluirTotal=${incluirTotal}`,
+        `cache hit cobranzas modo=${normalizedDto.modoPaginacion} incluirTotal=${incluirTotal}`,
       );
       return cached;
     }
@@ -93,7 +82,7 @@ export class CuotasVencidasService {
     const pending = this.inFlight.get(cacheKey);
     if (pending) {
       this.logger.debug(
-        `cache join cuotas-vencidas modo=${normalizedDto.modoPaginacion} incluirTotal=${incluirTotal}`,
+        `cache join cobranzas modo=${normalizedDto.modoPaginacion} incluirTotal=${incluirTotal}`,
       );
       return pending;
     }
@@ -161,7 +150,7 @@ export class CuotasVencidasService {
     incluirTotal: boolean,
     startedAt: number,
     filters: number,
-  ): Promise<CuotasVencidasResponse> {
+  ): Promise<CobranzasResponse> {
     const pagina = Math.floor(offset / limite) + 1;
 
     const qb = this.repo.createQueryBuilder('v');
@@ -170,13 +159,15 @@ export class CuotasVencidasService {
 
     if (!incluirTotal) {
       const pagedDataQb = this.applyOrder(dataQb).skip(offset).take(limite + 1);
-      const querySnapshots = [this.captureQuery('data', pagedDataQb)];
+      const querySnapshots = [
+        captureQuerySnapshot('data', pagedDataQb),
+      ] as QueryDebugSnapshot[];
       const dataResult = await measureAsync(() =>
-        pagedDataQb.getRawMany<CuotasVencidasRow>(),
+        pagedDataQb.getRawMany<CobranzasRow>(),
       );
 
       const tieneMas = dataResult.result.length > limite;
-      const response: CuotasVencidasResponse = {
+      const response: CobranzasResponse = {
         data: dataResult.result.slice(0, limite),
         total: null,
         limite,
@@ -206,22 +197,22 @@ export class CuotasVencidasService {
     }
 
     const countQb = qb.clone();
-    const pagedDataQb = this.applyOrder(
-      this.selectDataColumns(qb.clone(), limite),
-    )
+      const pagedDataQb = this.applyOrder(
+        this.selectDataColumns(qb.clone(), limite),
+      )
       .skip(offset)
       .take(limite);
     const querySnapshots = [
-      this.captureQuery('count', countQb),
-      this.captureQuery('data', pagedDataQb),
-    ];
+      captureQuerySnapshot('count', countQb),
+      captureQuerySnapshot('data', pagedDataQb),
+    ] as QueryDebugSnapshot[];
 
     const [countResult, dataResult] = await Promise.all([
       measureAsync(() => countQb.getCount()),
-      measureAsync(() => pagedDataQb.getRawMany<CuotasVencidasRow>()),
+      measureAsync(() => pagedDataQb.getRawMany<CobranzasRow>()),
     ]);
 
-    const response: CuotasVencidasResponse = {
+    const response: CobranzasResponse = {
       data: dataResult.result,
       total: countResult.result,
       limite,
@@ -255,7 +246,7 @@ export class CuotasVencidasService {
     incluirTotal: boolean,
     startedAt: number,
     filters: number,
-  ): Promise<CuotasVencidasResponse> {
+  ): Promise<CobranzasResponse> {
     const baseQb = this.repo.createQueryBuilder('v');
     this.applyFilters(baseQb, dto);
 
@@ -266,28 +257,32 @@ export class CuotasVencidasService {
     }
 
     const pagedDataQb = this.applyOrder(dataQb).take(limite + 1);
-    const querySnapshots: QueryDebugSnapshot[] = [
-      this.captureQuery('data', pagedDataQb),
-    ];
+    const querySnapshots = [
+      captureQuerySnapshot('data', pagedDataQb),
+    ] as QueryDebugSnapshot[];
     const countQb = incluirTotal ? baseQb.clone() : null;
     if (countQb) {
-      querySnapshots.unshift(this.captureQuery('count', countQb));
+      querySnapshots.unshift(captureQuerySnapshot('count', countQb));
     }
 
     const dataPromise = measureAsync(() =>
-      pagedDataQb.getRawMany<CuotasVencidasRow>(),
+      pagedDataQb.getRawMany<CobranzasRow>(),
     );
     const totalPromise = incluirTotal
       ? measureAsync(() => countQb!.getCount())
       : Promise.resolve(null);
 
-    const [countResult, dataResult] = await Promise.all([totalPromise, dataPromise]);
+    const [countResult, dataResult] = await Promise.all([
+      totalPromise,
+      dataPromise,
+    ]);
     const tieneMas = dataResult.result.length > limite;
     const data = dataResult.result.slice(0, limite);
     const lastItem = data[data.length - 1];
-    const nextCursor = tieneMas && lastItem ? this.encodeCursor(lastItem) : null;
+    const nextCursor =
+      tieneMas && lastItem ? this.encodeCursor(lastItem) : null;
 
-    const response: CuotasVencidasResponse = {
+    const response: CobranzasResponse = {
       data,
       total: countResult?.result ?? null,
       limite,
@@ -320,45 +315,17 @@ export class CuotasVencidasService {
   }
 
   private applyFilters(
-    qb: SelectQueryBuilder<CuotasVencidasEntity>,
+    qb: SelectQueryBuilder<CobranzasEntity>,
     dto: PaginacionDto,
   ) {
     if (
-      dto.mesesMoraHasta !== undefined &&
-      dto.mesesMoraHastaExclusivo !== undefined
+      dto.mesesAtrasoDesde !== undefined &&
+      dto.mesesAtrasoHasta !== undefined &&
+      dto.mesesAtrasoDesde > dto.mesesAtrasoHasta
     ) {
       throw new BadRequestException(
-        'No puedes enviar mesesMoraHasta y mesesMoraHastaExclusivo al mismo tiempo',
+        'mesesAtrasoDesde no puede ser mayor que mesesAtrasoHasta',
       );
-    }
-
-    const fechaVencimientoDesde =
-      dto.fechaVencimientoDesde ?? dto.fechaDesde;
-    const fechaVencimientoHasta =
-      dto.fechaVencimientoHasta ?? dto.fechaHasta;
-
-    if (dto.numeroContrato) {
-      qb.andWhere('v.numeroContrato = :numeroContrato', {
-        numeroContrato: dto.numeroContrato,
-      });
-    }
-
-    if (dto.documento) {
-      qb.andWhere('v.documento = :documento', {
-        documento: dto.documento,
-      });
-    }
-
-    if (dto.idCliente) {
-      qb.andWhere('v.idCliente = :idCliente', {
-        idCliente: dto.idCliente,
-      });
-    }
-
-    if (dto.sucursal) {
-      qb.andWhere('v.sucursal = :sucursal', {
-        sucursal: dto.sucursal,
-      });
     }
 
     if (dto.estado) {
@@ -367,136 +334,80 @@ export class CuotasVencidasService {
       });
     }
 
-    if (dto.estadoContrato) {
-      qb.andWhere('v.estadoContrato = :estadoContrato', {
-        estadoContrato: dto.estadoContrato,
+    if (dto.mesesAtrasoDesde !== undefined) {
+      qb.andWhere('v.mesesAtraso >= :mesesAtrasoDesde', {
+        mesesAtrasoDesde: dto.mesesAtrasoDesde,
       });
     }
 
-    if (dto.estadoCuota) {
-      qb.andWhere('v.estadoCuota = :estadoCuota', {
-        estadoCuota: dto.estadoCuota,
+    if (dto.mesesAtrasoHasta !== undefined) {
+      qb.andWhere('v.mesesAtraso <= :mesesAtrasoHasta', {
+        mesesAtrasoHasta: dto.mesesAtrasoHasta,
       });
-    }
-
-    if (dto.vendedor) {
-      qb.andWhere('v.vendedor = :vendedor', {
-        vendedor: dto.vendedor,
-      });
-    }
-
-    if (dto.mesesMoraDesde !== undefined) {
-      qb.andWhere('v.mesesMora >= :mesesMoraDesde', {
-        mesesMoraDesde: dto.mesesMoraDesde,
-      });
-    }
-
-    if (dto.mesesMoraHasta !== undefined) {
-      qb.andWhere('v.mesesMora <= :mesesMoraHasta', {
-        mesesMoraHasta: dto.mesesMoraHasta,
-      });
-    }
-
-    if (dto.mesesMoraHastaExclusivo !== undefined) {
-      qb.andWhere('v.mesesMora < :mesesMoraHastaExclusivo', {
-        mesesMoraHastaExclusivo: dto.mesesMoraHastaExclusivo,
-      });
-    }
-
-    if (fechaVencimientoDesde) {
-      qb.andWhere(
-        "v.fechaVencimiento >= TO_DATE(:fechaVencimientoDesde, 'YYYY-MM-DD')",
-        { fechaVencimientoDesde },
-      );
-    }
-
-    if (fechaVencimientoHasta) {
-      qb.andWhere(
-        "v.fechaVencimiento <= TO_DATE(:fechaVencimientoHasta, 'YYYY-MM-DD')",
-        { fechaVencimientoHasta },
-      );
-    }
-
-    if (dto.ultimoPagoDesde) {
-      qb.andWhere(
-        "v.ultimoPago >= TO_DATE(:ultimoPagoDesde, 'YYYY-MM-DD')",
-        { ultimoPagoDesde: dto.ultimoPagoDesde },
-      );
-    }
-
-    if (dto.ultimoPagoHasta) {
-      qb.andWhere(
-        "v.ultimoPago <= TO_DATE(:ultimoPagoHasta, 'YYYY-MM-DD')",
-        { ultimoPagoHasta: dto.ultimoPagoHasta },
-      );
     }
   }
 
-  private applyOrder(qb: SelectQueryBuilder<CuotasVencidasEntity>) {
+  private applyOrder(qb: SelectQueryBuilder<CobranzasEntity>) {
     return qb
-      .orderBy('v.mesesMora', 'DESC', 'NULLS LAST')
-      .addOrderBy('v.fechaVencimiento', 'ASC', 'NULLS LAST')
-      .addOrderBy('v.numeroContrato', 'ASC')
-      .addOrderBy('v.numeroCuota', 'ASC');
+      .orderBy('v.mesesAtraso', 'DESC', 'NULLS LAST')
+      .addOrderBy('v.vencimiento', 'ASC', 'NULLS LAST')
+      .addOrderBy('v.contrato', 'ASC')
+      .addOrderBy('v.cuota', 'ASC');
   }
 
   private selectDataColumns(
-    qb: SelectQueryBuilder<CuotasVencidasEntity>,
+    qb: SelectQueryBuilder<CobranzasEntity>,
     firstRowsHint?: number,
   ) {
     return qb
       .select(
-        withOracleFirstRowsHint('v.idFraccion', firstRowsHint),
-        'idFraccion',
+        withOracleFirstRowsHint('v.contrato', firstRowsHint),
+        'contrato',
       )
-      .addSelect('v.nombreFraccion', 'nombreFraccion')
-      .addSelect('v.idManzana', 'idManzana')
-      .addSelect('v.idLote', 'idLote')
-      .addSelect('v.numeroContrato', 'numeroContrato')
       .addSelect('v.fecContrato', 'fecContrato')
-      .addSelect('v.fecTrato', 'fecTrato')
+      .addSelect('v.titular', 'titular')
+      .addSelect('v.ciRuc', 'ciRuc')
+      .addSelect('v.telefono', 'telefono')
       .addSelect('v.sucursal', 'sucursal')
-      .addSelect('v.nombreParaDocumento', 'nombreParaDocumento')
-      .addSelect('v.idCliente', 'idCliente')
-      .addSelect('v.documento', 'documento')
-      .addSelect('v.numeroCuota', 'numeroCuota')
-      .addSelect('v.estado', 'estado')
-      .addSelect('v.montoCuota', 'montoCuota')
+      .addSelect('v.fraccion', 'fraccion')
+      .addSelect('v.manzana', 'manzana')
+      .addSelect('v.lote', 'lote')
+      .addSelect('v.padron', 'padron')
+      .addSelect('v.vencimiento', 'vencimiento')
+      .addSelect('v.cuota', 'cuota')
+      .addSelect('v.importeCuota', 'importeCuota')
       .addSelect('v.plazo', 'plazo')
-      .addSelect('v.moraCuota', 'moraCuota')
-      .addSelect('v.fechaVencimiento', 'fechaVencimiento')
-      .addSelect('v.mesesMora', 'mesesMora')
       .addSelect('v.ultimoPago', 'ultimoPago')
+      .addSelect('v.fechaSenia', 'fechaSenia')
+      .addSelect('v.mesesAtraso', 'mesesAtraso')
       .addSelect('v.saldoVencido', 'saldoVencido')
-      .addSelect('v.telefonoCelular', 'telefonoCelular')
-      .addSelect('v.estadoContrato', 'estadoContrato')
-      .addSelect('v.vendedor', 'vendedor')
-      .addSelect('v.estadoCuota', 'estadoCuota');
+      .addSelect('v.interes', 'interes')
+      .addSelect('v.estado', 'estado');
   }
 
   private applyCursorFilter(
-    qb: SelectQueryBuilder<CuotasVencidasEntity>,
+    qb: SelectQueryBuilder<CobranzasEntity>,
     cursor: CursorPayload,
   ) {
     const tieBreakerCondition = `(
-      v.numeroContrato > :cursorNumeroContrato
+      v.contrato > :cursorContrato
       OR (
-        v.numeroContrato = :cursorNumeroContrato
-        AND v.numeroCuota > :cursorNumeroCuota
+        v.contrato = :cursorContrato
+        AND v.cuota > :cursorCuota
       )
     )`;
 
-    if (cursor.mm === null) {
-      if (cursor.fv === null) {
+    if (cursor.ma === null) {
+      if (cursor.v === null) {
         qb.andWhere(
           `(
-            v.mesesMora IS NULL
-            AND v.fechaVencimiento IS NULL
+            v.mesesAtraso IS NULL
+            AND v.vencimiento IS NULL
             AND ${tieBreakerCondition}
           )`,
           {
-            cursorNumeroContrato: cursor.nc,
-            cursorNumeroCuota: cursor.nq,
+            cursorContrato: cursor.c,
+            cursorCuota: cursor.q,
           },
         );
         return;
@@ -504,40 +415,40 @@ export class CuotasVencidasService {
 
       qb.andWhere(
         `(
-          v.mesesMora IS NULL
+          v.mesesAtraso IS NULL
           AND (
-            v.fechaVencimiento > TO_DATE(:cursorFechaVencimiento, 'YYYY-MM-DD HH24:MI:SS')
-            OR v.fechaVencimiento IS NULL
+            v.vencimiento > TO_DATE(:cursorVencimiento, 'YYYY-MM-DD HH24:MI:SS')
+            OR v.vencimiento IS NULL
             OR (
-              v.fechaVencimiento = TO_DATE(:cursorFechaVencimiento, 'YYYY-MM-DD HH24:MI:SS')
+              v.vencimiento = TO_DATE(:cursorVencimiento, 'YYYY-MM-DD HH24:MI:SS')
               AND ${tieBreakerCondition}
             )
           )
         )`,
         {
-          cursorFechaVencimiento: cursor.fv,
-          cursorNumeroContrato: cursor.nc,
-          cursorNumeroCuota: cursor.nq,
+          cursorVencimiento: cursor.v,
+          cursorContrato: cursor.c,
+          cursorCuota: cursor.q,
         },
       );
       return;
     }
 
-    if (cursor.fv === null) {
+    if (cursor.v === null) {
       qb.andWhere(
         `(
-          v.mesesMora < :cursorMesesMora
-          OR v.mesesMora IS NULL
+          v.mesesAtraso < :cursorMesesAtraso
+          OR v.mesesAtraso IS NULL
           OR (
-            v.mesesMora = :cursorMesesMora
-            AND v.fechaVencimiento IS NULL
+            v.mesesAtraso = :cursorMesesAtraso
+            AND v.vencimiento IS NULL
             AND ${tieBreakerCondition}
           )
         )`,
         {
-          cursorMesesMora: cursor.mm,
-          cursorNumeroContrato: cursor.nc,
-          cursorNumeroCuota: cursor.nq,
+          cursorMesesAtraso: cursor.ma,
+          cursorContrato: cursor.c,
+          cursorCuota: cursor.q,
         },
       );
       return;
@@ -545,35 +456,35 @@ export class CuotasVencidasService {
 
     qb.andWhere(
       `(
-        v.mesesMora < :cursorMesesMora
-        OR v.mesesMora IS NULL
+        v.mesesAtraso < :cursorMesesAtraso
+        OR v.mesesAtraso IS NULL
         OR (
-          v.mesesMora = :cursorMesesMora
+          v.mesesAtraso = :cursorMesesAtraso
           AND (
-            v.fechaVencimiento > TO_DATE(:cursorFechaVencimiento, 'YYYY-MM-DD HH24:MI:SS')
-            OR v.fechaVencimiento IS NULL
+            v.vencimiento > TO_DATE(:cursorVencimiento, 'YYYY-MM-DD HH24:MI:SS')
+            OR v.vencimiento IS NULL
             OR (
-              v.fechaVencimiento = TO_DATE(:cursorFechaVencimiento, 'YYYY-MM-DD HH24:MI:SS')
+              v.vencimiento = TO_DATE(:cursorVencimiento, 'YYYY-MM-DD HH24:MI:SS')
               AND ${tieBreakerCondition}
             )
           )
         )
       )`,
       {
-        cursorMesesMora: cursor.mm,
-        cursorFechaVencimiento: cursor.fv,
-        cursorNumeroContrato: cursor.nc,
-        cursorNumeroCuota: cursor.nq,
+        cursorMesesAtraso: cursor.ma,
+        cursorVencimiento: cursor.v,
+        cursorContrato: cursor.c,
+        cursorCuota: cursor.q,
       },
     );
   }
 
-  private encodeCursor(item: CuotasVencidasRow): string {
+  private encodeCursor(item: CobranzasRow): string {
     const payload: CursorPayload = {
-      mm: this.formatCursorMora(item.mesesMora),
-      fv: this.formatCursorDate(item.fechaVencimiento),
-      nc: item.numeroContrato ?? '',
-      nq: Number(item.numeroCuota ?? 0),
+      ma: this.formatCursorMesesAtraso(item.mesesAtraso),
+      v: this.formatCursorDate(item.vencimiento),
+      c: item.contrato ?? '',
+      q: Number(item.cuota ?? 0),
     };
 
     return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
@@ -585,21 +496,21 @@ export class CuotasVencidasService {
         Buffer.from(cursor, 'base64url').toString('utf8'),
       ) as Partial<CursorPayload>;
 
-      const mesesMora = this.parseCursorMora(parsed.mm);
-      const fechaVencimiento = this.parseCursorDate(parsed.fv);
+      const mesesAtraso = this.parseCursorMesesAtraso(parsed.ma);
+      const vencimiento = this.parseCursorDate(parsed.v);
 
       if (
-        typeof parsed.nc !== 'string' ||
-        typeof parsed.nq !== 'number'
+        typeof parsed.c !== 'string' ||
+        typeof parsed.q !== 'number'
       ) {
         throw new Error('Cursor incompleto');
       }
 
       return {
-        mm: mesesMora,
-        fv: fechaVencimiento,
-        nc: parsed.nc,
-        nq: parsed.nq,
+        ma: mesesAtraso,
+        v: vencimiento,
+        c: parsed.c,
+        q: parsed.q,
       };
     } catch {
       throw new BadRequestException('Cursor inválido');
@@ -626,17 +537,19 @@ export class CuotasVencidasService {
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
   }
 
-  private formatCursorMora(value?: number | string | null): number | null {
+  private formatCursorMesesAtraso(value?: number | string | null): number | null {
     if (value === null || value === undefined || value === '') {
       return null;
     }
 
-    const mora = Number(value);
-    if (Number.isNaN(mora)) {
-      throw new BadRequestException('No se pudo construir el cursor de mesesMora');
+    const mesesAtraso = Number(value);
+    if (Number.isNaN(mesesAtraso)) {
+      throw new BadRequestException(
+        'No se pudo construir el cursor de mesesAtraso',
+      );
     }
 
-    return mora;
+    return mesesAtraso;
   }
 
   private parseCursorDate(value: unknown): string | null {
@@ -648,19 +561,19 @@ export class CuotasVencidasService {
       throw new Error('Cursor de fecha inválido');
     }
 
-    return value === CuotasVencidasService.NULL_DATE_CURSOR ? null : value;
+    return value === CobranzasService.NULL_DATE_CURSOR ? null : value;
   }
 
-  private parseCursorMora(value: unknown): number | null {
+  private parseCursorMesesAtraso(value: unknown): number | null {
     if (value === null) {
       return null;
     }
 
     if (typeof value !== 'number') {
-      throw new Error('Cursor de mesesMora inválido');
+      throw new Error('Cursor de mesesAtraso inválido');
     }
 
-    return value === CuotasVencidasService.NULL_MORA_CURSOR ? null : value;
+    return value === CobranzasService.NULL_MESES_ATRASO_CURSOR ? null : value;
   }
 
   private logSlowRequest(input: {
@@ -685,28 +598,15 @@ export class CuotasVencidasService {
     }
 
     this.logger.warn(
-      `findAll cuotas-vencidas lento total=${totalDurationMs}ms data=${input.dataDurationMs}ms count=${input.countDurationMs ?? 0}ms limite=${input.limite} incluirTotal=${input.incluirTotal} rows=${input.rows} filters=${input.filters} modo=${input.modoPaginacion}`,
+      `findAll cobranzas lento total=${totalDurationMs}ms data=${input.dataDurationMs}ms count=${input.countDurationMs ?? 0}ms limite=${input.limite} incluirTotal=${input.incluirTotal} rows=${input.rows} filters=${input.filters} modo=${input.modoPaginacion}`,
     );
 
     if (this.logSlowSql && input.querySnapshots?.length) {
       for (const snapshot of input.querySnapshots) {
         this.logger.warn(
-          `slow-sql cuotas-vencidas ${snapshot.label} sql=${snapshot.sql} params=${JSON.stringify(snapshot.parameters)}`,
+          `slow-sql cobranzas ${snapshot.label} sql=${snapshot.sql} params=${JSON.stringify(snapshot.parameters)}`,
         );
       }
     }
   }
-
-  private captureQuery(
-    label: string,
-    qb: SelectQueryBuilder<CuotasVencidasEntity>,
-  ): QueryDebugSnapshot {
-    const [sql, parameters] = qb.getQueryAndParameters();
-    return {
-      label,
-      sql: sql.replace(/\s+/g, ' ').trim(),
-      parameters,
-    };
-  }
 }
-

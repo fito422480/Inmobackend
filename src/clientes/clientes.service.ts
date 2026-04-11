@@ -14,6 +14,7 @@ import {
   parsePositiveNumber,
   QueryDebugSnapshot,
   setCacheValue,
+  withOracleFirstRowsHint,
 } from '../common/query-performance.util';
 
 type ClientesResponse = PaginacionResponseDto<ClientesEntity>;
@@ -80,7 +81,7 @@ export class ClientesService {
     const loadPromise = (async () => {
       const qb = this.repo.createQueryBuilder('v');
       this.applyFilters(qb, normalizedDto);
-      const dataQb = this.selectDataColumns(qb.clone());
+      const dataQb = this.selectDataColumns(qb.clone(), limite + 1);
 
       if (!incluirTotal) {
         const pagedDataQb = this.applyOrder(dataQb)
@@ -132,7 +133,9 @@ export class ClientesService {
       }
 
       const countQb = qb.clone();
-      const pagedDataQb = this.applyOrder(this.selectDataColumns(qb.clone()))
+      const pagedDataQb = this.applyOrder(
+        this.selectDataColumns(qb.clone(), limite),
+      )
         .skip(offset)
         .take(limite);
       const querySnapshots = [
@@ -423,9 +426,15 @@ export class ClientesService {
       .addOrderBy('v.numeroContrato', 'ASC');
   }
 
-  private selectDataColumns(qb: SelectQueryBuilder<ClientesEntity>) {
+  private selectDataColumns(
+    qb: SelectQueryBuilder<ClientesEntity>,
+    firstRowsHint?: number,
+  ) {
     return qb
-      .select('v.idPersona', 'idPersona')
+      .select(
+        withOracleFirstRowsHint('v.idPersona', firstRowsHint),
+        'idPersona',
+      )
       .addSelect('v.direccionEmail', 'direccionEmail')
       .addSelect('v.direccionParticular', 'direccionParticular')
       .addSelect('v.documento', 'documento')

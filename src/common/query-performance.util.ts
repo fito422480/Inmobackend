@@ -97,6 +97,17 @@ export function captureQuerySnapshot<Entity>(
   };
 }
 
+export function withOracleFirstRowsHint(
+  selection: string,
+  rows?: number,
+): string {
+  if (!rows || rows < 1) {
+    return selection;
+  }
+
+  return `/*+ FIRST_ROWS(${rows}) */ ${selection}`;
+}
+
 function pruneCache<T>(cache: Map<string, CacheEntry<T>>, maxItems: number) {
   const now = Date.now();
   for (const [key, entry] of cache.entries()) {
