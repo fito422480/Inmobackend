@@ -36,6 +36,7 @@
     "@types/node": "^25.5.0",
     "autocannon": "^8.0.0",
     "clinic": "^13.0.0",
+    "cloudflared": "^0.7.1",
     "concurrently": "^9.2.1",
     "typescript": "^5.9.3"
   }

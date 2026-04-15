@@ -117,6 +117,9 @@ Instalar dependencias:
 npm install
 ```
 
+Ese paso instala tambien `cloudflared` localmente, asi que `npm run start:tunnel`
+no requiere una instalacion global adicional.
+
 Modo desarrollo:
 
 ```bash
@@ -138,7 +141,7 @@ npm start
 | `npm start` | Ejecuta `dist/main.js` |
 | `npm run start:dev` | Ejecuta el watcher con recompilación y reinicio automático |
 | `npm run start:prod` | Ejecuta `dist/main.js` |
-| `npm run start:tunnel` | Levanta la app y publica con `cloudflared` |
+| `npm run start:tunnel` | Levanta la app y publica con el `cloudflared` local del proyecto |
 | `npm run bench:clientes` | Ejecuta carga sobre `/clientes` con `autocannon` |
 | `npm run bench:lotes` | Ejecuta carga sobre `/lotes` con `autocannon` |
 | `npm run bench:cuotas-pagadas` | Ejecuta carga sobre `/cuotas-pagadas` |

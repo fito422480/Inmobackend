@@ -81,6 +81,9 @@ export class CuotasPagadasService {
     const loadPromise = (async () => {
       // ── Construcción dinámica de filtros ──────────────────────────────────────
       const qb = this.repo.createQueryBuilder('v');
+      qb.where('v.numeroCuota > :numeroCuotaMinima', {
+        numeroCuotaMinima: 1,
+      });
 
       if (normalizedDto.numeroContrato) {
         qb.andWhere('v.numeroContrato = :numeroContrato', {
@@ -240,8 +243,8 @@ export class CuotasPagadasService {
     const offset = dto.offset || 0;
 
     // Parámetros dinámicos
-    const params: any = { limite, offset };
-    const filtros: string[] = [];
+    const params: any = { limite, offset, numeroCuotaMinima: 1 };
+    const filtros: string[] = ['NUMERO_CUOTA > :numeroCuotaMinima'];
 
     if (dto.numeroContrato) {
       filtros.push(`NUMERO_CONTRATO = :numeroContrato`);

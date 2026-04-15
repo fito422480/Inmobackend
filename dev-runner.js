@@ -12,6 +12,7 @@ let buildRunning = false;
 let rebuildQueued = false;
 let rebuildTimer = null;
 let stoppingForRestart = false;
+let stopWaiters = [];
 
 function log(message) {
   console.log(`[dev-watch] ${message}`);
@@ -29,7 +30,6 @@ function formatDiagnostics(diagnostics) {
 
 function buildProject() {
   log("Compilando proyecto...");
-  fs.rmSync(path.join(workspaceRoot, "dist"), { recursive: true, force: true });
 
   const configPath = ts.findConfigFile(
     workspaceRoot,
@@ -75,14 +75,50 @@ function buildProject() {
   return !emitResult.emitSkipped && !hasErrors;
 }
 
-function stopApp() {
-  if (!appProcess) {
+async function waitForBuildArtifacts() {
+  const requiredFiles = [
+    distEntry,
+    path.join(workspaceRoot, "dist", "app.module.js"),
+  ];
+  const timeoutMs = 3000;
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (requiredFiles.every((filePath) => fs.existsSync(filePath))) {
+      return true;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  const missing = requiredFiles
+    .filter((filePath) => !fs.existsSync(filePath))
+    .map((filePath) => path.relative(workspaceRoot, filePath));
+
+  log(`El build terminó pero faltan archivos: ${missing.join(", ")}`);
+  return false;
+}
+
+function resolveStopWaiters() {
+  if (stopWaiters.length === 0) {
     return;
   }
 
+  const waiters = stopWaiters;
+  stopWaiters = [];
+  waiters.forEach((resolve) => resolve());
+}
+
+function stopApp() {
+  if (!appProcess) {
+    return Promise.resolve();
+  }
+
   stoppingForRestart = true;
-  appProcess.kill();
-  appProcess = null;
+  return new Promise((resolve) => {
+    stopWaiters.push(resolve);
+    appProcess.kill();
+  });
 }
 
 function startApp() {
@@ -104,6 +140,7 @@ function startApp() {
       log(`El backend terminó con código ${code}`);
     }
     appProcess = null;
+    resolveStopWaiters();
   });
 }
 
@@ -115,11 +152,16 @@ async function rebuildAndRestart(reason) {
 
   buildRunning = true;
   log(`Cambio detectado en ${reason}. Reiniciando...`);
-  stopApp();
+  await stopApp();
 
   const ok = buildProject();
-  if (ok) {
-    startApp();
+  if (ok && !rebuildQueued) {
+    const artifactsReady = await waitForBuildArtifacts();
+    if (artifactsReady) {
+      startApp();
+    }
+  } else if (ok) {
+    log("Se detectaron más cambios durante el build; recompilando antes de reiniciar");
   } else {
     log("El build falló; el backend no se reinició");
   }
@@ -176,7 +218,10 @@ async function main() {
 
   const ok = buildProject();
   if (ok) {
-    startApp();
+    const artifactsReady = await waitForBuildArtifacts();
+    if (artifactsReady) {
+      startApp();
+    }
   } else {
     log("El build inicial falló; quedo esperando cambios");
   }
