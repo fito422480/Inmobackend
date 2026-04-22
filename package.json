@@ -10,6 +10,7 @@
     "bench:cuotas-vencidas": "node scripts/run-autocannon.js cuotasVencidas",
     "prestart": "npm run build",
     "export:cobranzas": "node scripts/export-cobranzas-csv.js",
+    "export:cuotas-pagadas": "node scripts/export-cuotas-pagadas-csv.js",
     "profile:doctor:clientes": "npm run build && clinic doctor --name clientes-doctor --dest .clinic --on-port \"node scripts/run-autocannon.js clientes --base-url=http://127.0.0.1:$PORT\" -- node dist/main.js",
     "profile:doctor:lotes": "npm run build && clinic doctor --name lotes-doctor --dest .clinic --on-port \"node scripts/run-autocannon.js lotes --base-url=http://127.0.0.1:$PORT\" -- node dist/main.js",
     "start": "node dist/main.js",

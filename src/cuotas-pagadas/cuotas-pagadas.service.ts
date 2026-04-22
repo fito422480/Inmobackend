@@ -1,4 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -138,8 +142,11 @@ export class CuotasPagadasService {
         );
 
         const tieneMas = dataResult.result.length > limite;
+        const data = this.mapCuotasPagadasRows(
+          dataResult.result.slice(0, limite),
+        );
         const response: CuotasPagadasResponse = {
-          data: dataResult.result.slice(0, limite),
+          data,
           total: null,
           limite,
           offset,
@@ -191,8 +198,9 @@ export class CuotasPagadasService {
         measureAsync(() => pagedDataQb.getMany()),
       ]);
 
+      const data = this.mapCuotasPagadasRows(dataResult.result);
       const response: CuotasPagadasResponse = {
-        data: dataResult.result,
+        data,
         total: countResult.result,
         limite,
         offset,
@@ -230,6 +238,8 @@ export class CuotasPagadasService {
     this.inFlight.set(cacheKey, loadPromise);
     try {
       return await loadPromise;
+    } catch (error) {
+      this.rethrowKnownOracleError(error);
     } finally {
       if (this.inFlight.get(cacheKey) === loadPromise) {
         this.inFlight.delete(cacheKey);
@@ -298,15 +308,21 @@ export class CuotasPagadasService {
       ${whereClause}
     `;
 
-    const [dataResult, countResult] = await Promise.all([
-      this.dataSource.query(sqlData, params),
-      this.dataSource.query(sqlCount, params),
-    ]);
+    let dataResult: any[];
+    let countResult: any[];
+    try {
+      [dataResult, countResult] = await Promise.all([
+        this.dataSource.query(sqlData, params),
+        this.dataSource.query(sqlCount, params),
+      ]);
+    } catch (error) {
+      this.rethrowKnownOracleError(error);
+    }
 
     const total = parseInt(countResult[0]?.TOTAL || '0');
 
     return {
-      data: dataResult,
+      data: this.mapCuotasPagadasRowsNativo(dataResult),
       total,
       limite,
       offset,
@@ -347,5 +363,87 @@ export class CuotasPagadasService {
         );
       }
     }
+  }
+
+  private mapCuotasPagadasRows(
+    rows: CuotasPagadasEntity[],
+  ): CuotasPagadasEntity[] {
+    return rows.map((row) => ({
+      ...row,
+      cuotaCobrada: this.calculateCuotaCobrada(row.montoCuota, row.notaCred),
+    }));
+  }
+
+  private mapCuotasPagadasRowsNativo(rows: any[]): any[] {
+    return rows.map((row) => ({
+      ...row,
+      CUOTA_COBRADA: this.calculateCuotaCobrada(row.MONTO_CUOTA, row.NOTA_CRED),
+    }));
+  }
+
+  private calculateCuotaCobrada(
+    montoCuota: unknown,
+    notaCred: unknown,
+  ): number {
+    return (
+      this.normalizeNumericValue(montoCuota) -
+      this.normalizeNumericValue(notaCred)
+    );
+  }
+
+  private normalizeNumericValue(value: unknown): number {
+    if (value === null || value === undefined || value === '') {
+      return 0;
+    }
+
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : 0;
+    }
+
+    if (typeof value === 'string') {
+      const normalized = value.trim();
+      if (!normalized) {
+        return 0;
+      }
+
+      const parsed = Number(normalized.replace(',', '.'));
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    return 0;
+  }
+
+  private rethrowKnownOracleError(error: unknown): never {
+    const code = this.extractOracleErrorCode(error);
+    const message = error instanceof Error ? error.message : String(error);
+
+    if (code === 'ORA-04045' || code === 'ORA-16000') {
+      this.logger.error(
+        `cuotas-pagadas source unavailable code=${code} message=${message}`,
+      );
+      throw new ServiceUnavailableException(
+        'La fuente Oracle ADCC.CBI_CUOTAS_PAGADAS_V esta invalida y no puede revalidarse porque la base esta en modo read-only. Debe corregirse o recompilarse en origen.',
+      );
+    }
+
+    throw error;
+  }
+
+  private extractOracleErrorCode(error: unknown): string | null {
+    if (!error || typeof error !== 'object') {
+      return null;
+    }
+
+    const candidate = error as { code?: unknown; message?: unknown };
+    if (typeof candidate.code === 'string' && candidate.code.startsWith('ORA-')) {
+      return candidate.code;
+    }
+
+    if (typeof candidate.message === 'string') {
+      const match = candidate.message.match(/ORA-\d{5}/);
+      return match?.[0] ?? null;
+    }
+
+    return null;
   }
 }
