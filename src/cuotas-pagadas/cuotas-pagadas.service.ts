@@ -370,14 +370,22 @@ export class CuotasPagadasService {
   ): CuotasPagadasEntity[] {
     return rows.map((row) => ({
       ...row,
+      montoCuota: this.roundAmountUp(row.montoCuota),
+      interesCobrado: this.roundAmountUp(row.interesCobrado),
+      descuentoInteres: this.roundAmountUp(row.descuentoInteres),
       cuotaCobrada: this.calculateCuotaCobrada(row.montoCuota, row.notaCred),
+      notaCred: this.roundAmountUp(row.notaCred),
     }));
   }
 
   private mapCuotasPagadasRowsNativo(rows: any[]): any[] {
     return rows.map((row) => ({
       ...row,
+      MONTO_CUOTA: this.roundAmountUp(row.MONTO_CUOTA),
+      INTERES_COBRADO: this.roundAmountUp(row.INTERES_COBRADO),
+      DESCUENTO_INTERES: this.roundAmountUp(row.DESCUENTO_INTERES),
       CUOTA_COBRADA: this.calculateCuotaCobrada(row.MONTO_CUOTA, row.NOTA_CRED),
+      NOTA_CRED: this.roundAmountUp(row.NOTA_CRED),
     }));
   }
 
@@ -385,10 +393,14 @@ export class CuotasPagadasService {
     montoCuota: unknown,
     notaCred: unknown,
   ): number {
-    return (
+    return this.roundAmountUp(
       this.normalizeNumericValue(montoCuota) -
-      this.normalizeNumericValue(notaCred)
+        this.normalizeNumericValue(notaCred),
     );
+  }
+
+  private roundAmountUp(value: unknown): number {
+    return Math.ceil(this.normalizeNumericValue(value));
   }
 
   private normalizeNumericValue(value: unknown): number {

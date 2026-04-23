@@ -273,6 +273,11 @@ GET /cuotas-pagadas?limite=100&offset=0&incluirTotal=false
 GET /cuotas-pagadas?documento=1234567&limite=100&offset=0
 ```
 
+Montos en la respuesta:
+
+- `montoCuota`, `interesCobrado`, `descuentoInteres`, `cuotaCobrada` y `notaCred` se devuelven como enteros.
+- El redondeo aplicado es hacia arriba.
+
 ### Clientes
 
 Ruta base:

@@ -61,7 +61,7 @@ export class CuotasPagadasEntity {
   cuotaCobrada: number;
 
   @ViewColumn({ name: 'NOTA_CRED' })
-  notaCred: string;
+  notaCred: number;
 
   @ViewColumn({ name: 'TELEFONO_CELULAR' })
   telefonoCelular: string;
