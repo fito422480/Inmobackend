@@ -17,6 +17,7 @@ export class DetalleCuotaDto {
   numeroCuota: number;
   montoCuota: number;
   cuotaCobrada: number | null;
+  moraCuota: number | null;
 }
 
 export class PaginacionResponseDto<T> {

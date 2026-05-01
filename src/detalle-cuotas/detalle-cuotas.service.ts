@@ -30,6 +30,7 @@ type OracleRow = {
   NUMERO_CUOTA?: unknown;
   MONTO_CUOTA?: unknown;
   CUOTA_COBRADA?: unknown;
+  MORA_CUOTA?: unknown;
   TOTAL?: unknown;
 };
 
@@ -247,7 +248,7 @@ export class DetalleCuotasService {
     const unionSql = this.buildUnionSql(paidWhere, pendingWhere);
 
     const dataSql = `
-      SELECT NUMERO_CONTRATO, FECHA_VENCIMIENTO, FECHA_PAGO, NUMERO_CUOTA, MONTO_CUOTA, CUOTA_COBRADA
+      SELECT NUMERO_CONTRATO, FECHA_VENCIMIENTO, FECHA_PAGO, NUMERO_CUOTA, MONTO_CUOTA, CUOTA_COBRADA, MORA_CUOTA
       FROM (
         SELECT d.*,
                ROW_NUMBER() OVER (
@@ -288,7 +289,8 @@ export class DetalleCuotasService {
         ccpv.FECHA_PAGO AS FECHA_PAGO,
         ccpv.NUMERO_CUOTA,
         ccpv.MONTO_CUOTA,
-        ccpv.CUOTA_COBRADA
+        ccpv.CUOTA_COBRADA,
+        ccpv.MORA_CUOTA
       FROM ADCC.CBI_CUOTAS_PAGADAS_V ccpv
       ${paidWhere}
 
@@ -300,7 +302,8 @@ export class DetalleCuotasService {
         CAST(NULL AS DATE) AS FECHA_PAGO,
         ccv.NUMERO_CUOTA,
         ccv.MONTO_CUOTA,
-        CAST(NULL AS NUMBER) AS CUOTA_COBRADA
+        CAST(NULL AS NUMBER) AS CUOTA_COBRADA,
+        CAST(NULL AS NUMBER) AS MORA_CUOTA
       FROM ADCC.CBI_CUOTAS_V ccv
       ${this.combinePendingWhere(pendingWhere)}
     `;
@@ -382,6 +385,10 @@ export class DetalleCuotasService {
         row.CUOTA_COBRADA === null || row.CUOTA_COBRADA === undefined
           ? null
           : this.normalizeNumber(row.CUOTA_COBRADA),
+      moraCuota:
+        row.MORA_CUOTA === null || row.MORA_CUOTA === undefined
+          ? null
+          : this.normalizeNumber(row.MORA_CUOTA),
     }));
   }
 
