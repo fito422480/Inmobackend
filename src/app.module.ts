@@ -9,6 +9,7 @@ import { RequestTimingInterceptor } from './common/request-timing.interceptor';
 import { CobranzasModule } from './cobranzas/cobranzas.module';
 import { CuotasPagadasModule } from './cuotas-pagadas/cuotas-pagadas.module';
 import { CuotasVencidasModule } from './cuotas-vencidas/cuotas-vencidas.module';
+import { DetalleCuotasModule } from './detalle-cuotas/detalle-cuotas.module';
 import { LotesModule } from './lotes/lotes.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -22,6 +23,7 @@ import { AppService } from './app.service';
     CobranzasModule,
     CuotasPagadasModule,
     CuotasVencidasModule,
+    DetalleCuotasModule,
     LotesModule,
     // Agregá acá tus módulos
   ],
