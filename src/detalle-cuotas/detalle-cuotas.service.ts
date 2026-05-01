@@ -26,6 +26,7 @@ type DetalleCuotasResponse = PaginacionResponseDto<DetalleCuotaDto>;
 type OracleRow = {
   NUMERO_CONTRATO?: unknown;
   FECHA_VENCIMIENTO?: unknown;
+  FECHA_PAGO?: unknown;
   NUMERO_CUOTA?: unknown;
   MONTO_CUOTA?: unknown;
   CUOTA_COBRADA?: unknown;
@@ -246,7 +247,7 @@ export class DetalleCuotasService {
     const unionSql = this.buildUnionSql(paidWhere, pendingWhere);
 
     const dataSql = `
-      SELECT NUMERO_CONTRATO, FECHA_VENCIMIENTO, NUMERO_CUOTA, MONTO_CUOTA, CUOTA_COBRADA
+      SELECT NUMERO_CONTRATO, FECHA_VENCIMIENTO, FECHA_PAGO, NUMERO_CUOTA, MONTO_CUOTA, CUOTA_COBRADA
       FROM (
         SELECT d.*,
                ROW_NUMBER() OVER (
@@ -284,6 +285,7 @@ export class DetalleCuotasService {
       SELECT
         ccpv.NUMERO_CONTRATO,
         ccpv.FECHA_VENCIMIENTO,
+        ccpv.FECHA_PAGO AS FECHA_PAGO,
         ccpv.NUMERO_CUOTA,
         ccpv.MONTO_CUOTA,
         ccpv.CUOTA_COBRADA
@@ -295,6 +297,7 @@ export class DetalleCuotasService {
       SELECT
         ccv.NUMERO_CONTRATO,
         ccv.FECHA_VENCIMIENTO,
+        CAST(NULL AS DATE) AS FECHA_PAGO,
         ccv.NUMERO_CUOTA,
         ccv.MONTO_CUOTA,
         CAST(NULL AS NUMBER) AS CUOTA_COBRADA
@@ -372,6 +375,7 @@ export class DetalleCuotasService {
     return rows.map((row) => ({
       numeroContrato: this.normalizeString(row.NUMERO_CONTRATO),
       fechaVencimiento: this.normalizeDate(row.FECHA_VENCIMIENTO),
+      fechaPago: this.normalizeDate(row.FECHA_PAGO),
       numeroCuota: this.normalizeNumber(row.NUMERO_CUOTA),
       montoCuota: this.normalizeNumber(row.MONTO_CUOTA),
       cuotaCobrada:

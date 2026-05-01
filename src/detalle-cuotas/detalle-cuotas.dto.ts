@@ -13,6 +13,7 @@ export class PaginacionDto {
 export class DetalleCuotaDto {
   numeroContrato: string;
   fechaVencimiento: Date | string | null;
+  fechaPago: Date | string | null;
   numeroCuota: number;
   montoCuota: number;
   cuotaCobrada: number | null;
