@@ -31,6 +31,8 @@ type CobranzasResponse = PaginacionResponseDto<CobranzasEntity>;
 export class CobranzasService {
   private static readonly NULL_DATE_CURSOR = '9999-12-31 23:59:59';
   private static readonly NULL_MESES_ATRASO_CURSOR = -1;
+  private static readonly DEFAULT_MESES_ATRASO = 0;
+  private static readonly ESTADOS_COBRANZAS = ['Activo', 'Bloqueado'];
   private readonly logger = new Logger(CobranzasService.name);
   private readonly cache = new Map<string, CacheEntry<CobranzasResponse>>();
   private readonly inFlight = new Map<string, Promise<CobranzasResponse>>();
@@ -319,6 +321,15 @@ export class CobranzasService {
     dto: PaginacionDto,
   ) {
     if (
+      dto.mesesAtraso !== undefined &&
+      (dto.mesesAtrasoDesde !== undefined || dto.mesesAtrasoHasta !== undefined)
+    ) {
+      throw new BadRequestException(
+        'No puedes enviar mesesAtraso junto con mesesAtrasoDesde o mesesAtrasoHasta',
+      );
+    }
+
+    if (
       dto.mesesAtrasoDesde !== undefined &&
       dto.mesesAtrasoHasta !== undefined &&
       dto.mesesAtrasoDesde > dto.mesesAtrasoHasta
@@ -328,10 +339,31 @@ export class CobranzasService {
       );
     }
 
+    qb.andWhere('v.estado IN (:...estadosCobranzas)', {
+      estadosCobranzas: CobranzasService.ESTADOS_COBRANZAS,
+    });
+
     if (dto.estado) {
       qb.andWhere('v.estado = :estado', {
         estado: dto.estado,
       });
+    }
+
+    if (dto.mesesAtraso !== undefined) {
+      qb.andWhere('v.mesesAtraso = :mesesAtraso', {
+        mesesAtraso: dto.mesesAtraso,
+      });
+      return;
+    }
+
+    if (
+      dto.mesesAtrasoDesde === undefined &&
+      dto.mesesAtrasoHasta === undefined
+    ) {
+      qb.andWhere('v.mesesAtraso = :defaultMesesAtraso', {
+        defaultMesesAtraso: CobranzasService.DEFAULT_MESES_ATRASO,
+      });
+      return;
     }
 
     if (dto.mesesAtrasoDesde !== undefined) {

@@ -4,6 +4,7 @@ export class PaginacionDto {
   cursor?: string;
   incluirTotal?: boolean;
   estado?: string;
+  mesesAtraso?: number;
   mesesAtrasoDesde?: number;
   mesesAtrasoHasta?: number;
 }

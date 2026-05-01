@@ -12,14 +12,16 @@ export class CobranzasController {
    *   limit|limite         número de registros por página (default: 100, max: 100000)
    *   cursor               cursor opaco para seguir a la siguiente página
    *   offset               fallback de compatibilidad para paginación tradicional
-   *   estado               filtrar por ESTADO
+   *   estado               filtrar por ESTADO dentro de Activo/Bloqueado
+   *   mesesAtraso          filtrar MESES_ATRASO exacto (default: 0)
    *   mesesAtrasoDesde     MESES_ATRASO >= valor
    *   mesesAtrasoHasta     MESES_ATRASO <= valor
    *   incluirTotal         true|false (default: false para evitar COUNT(*) en vistas grandes)
    *
    * Ejemplos:
    *   GET /cobranzas?limit=100
-   *   GET /cobranzas?estado=VENCIDO&limit=100
+   *   GET /cobranzas?estado=Activo&limit=100
+   *   GET /cobranzas?mesesAtraso=0&limit=100
    *   GET /cobranzas?mesesAtrasoDesde=3&mesesAtrasoHasta=12&limit=100
    *   GET /cobranzas?incluirTotal=true&offset=0&limit=100
    */
@@ -30,6 +32,7 @@ export class CobranzasController {
     @Query('cursor') cursor?: string,
     @Query('offset') offset?: string,
     @Query('estado') estado?: string,
+    @Query('mesesAtraso') mesesAtraso?: string,
     @Query('mesesAtrasoDesde') mesesAtrasoDesde?: string,
     @Query('mesesAtrasoHasta') mesesAtrasoHasta?: string,
     @Query('incluirTotal') incluirTotal?: string,
@@ -40,6 +43,7 @@ export class CobranzasController {
       cursor,
       incluirTotal: this.parseBoolean(incluirTotal),
       estado,
+      mesesAtraso: this.parseOptionalNumber(mesesAtraso),
       mesesAtrasoDesde: this.parseOptionalNumber(mesesAtrasoDesde),
       mesesAtrasoHasta: this.parseOptionalNumber(mesesAtrasoHasta),
     });
