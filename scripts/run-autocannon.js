@@ -9,6 +9,7 @@ const PRESETS = {
   lotes: '/lotes?limite=100&offset=0',
   cuotasPagadas: '/cuotas-pagadas?limite=100&offset=0&incluirTotal=false',
   cuotasVencidas: '/cuotas-vencidas?limit=100&incluirTotal=false',
+  estadoCuentas: '/estado-cuentas?limit=100&incluirTotal=false',
 };
 
 loadEnvFile();
@@ -58,6 +59,7 @@ Presets disponibles:
   lotes
   cuotasPagadas
   cuotasVencidas
+  estadoCuentas
 
 Opciones:
   --base-url=http://127.0.0.1:3000

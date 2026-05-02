@@ -8,7 +8,7 @@ Backend en NestJS con adapter Fastify para consultar Oracle con o sin túnel SSH
 - Si SSH está habilitado, expone Oracle localmente a través de ese túnel.
 - Espera a que la ruta de conexión esté lista antes de crear el pool de TypeORM.
 - Si el túnel SSH está habilitado y se cae, intenta reconectar.
-- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `cuotas-pagadas`, `cuotas-vencidas` y `cobranzas`.
+- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `cuotas-pagadas`, `cuotas-vencidas`, `cobranzas` y `estado-cuentas`.
 
 ## Stack
 
@@ -96,6 +96,9 @@ En producción:
 | `CUOTAS_VENCIDAS_CACHE_MAX_ITEMS` | `200` |
 | `COBRANZAS_CACHE_TTL_MS` | `15000` |
 | `COBRANZAS_CACHE_MAX_ITEMS` | `200` |
+| `ESTADO_CUENTAS_MAX_LIMIT` | `5000` |
+| `ESTADO_CUENTAS_CACHE_TTL_MS` | `15000` |
+| `ESTADO_CUENTAS_CACHE_MAX_ITEMS` | `200` |
 
 ## Seguridad
 
@@ -146,6 +149,7 @@ npm start
 | `npm run bench:lotes` | Ejecuta carga sobre `/lotes` con `autocannon` |
 | `npm run bench:cuotas-pagadas` | Ejecuta carga sobre `/cuotas-pagadas` |
 | `npm run bench:cuotas-vencidas` | Ejecuta carga sobre `/cuotas-vencidas` |
+| `npm run bench:estado-cuentas` | Ejecuta carga sobre `/estado-cuentas` |
 | `npm run export:cobranzas` | Exporta `/cobranzas` a CSV recorriendo todas las páginas |
 | `npm run export:cuotas-vencidas` | Exporta `/cuotas-vencidas` a CSV recorriendo todas las páginas |
 | `npm run profile:doctor:clientes` | Perf profiling con `clinic doctor` sobre `/clientes` |
@@ -161,6 +165,7 @@ Ejemplos:
 npm run bench:clientes
 npm run bench:lotes
 node scripts/run-autocannon.js cuotasVencidas --connections=50 --duration=60
+node scripts/run-autocannon.js estadoCuentas --connections=20 --duration=30
 node scripts/run-autocannon.js /clientes?limite=100&offset=0 --connections=20 --duration=30
 node scripts/run-autocannon.js cuotasVencidas --connections=5 --duration=30 --timeout=120
 ```
@@ -178,18 +183,39 @@ npm run profile:doctor:lotes
 Nota:
 - `clinic.js` es útil para diagnóstico, pero con Node 22 puede fallar o dar resultados inconsistentes.
 - Si eso pasa, conviene correr `clinic` con Node 20 LTS o usar `autocannon` junto con el profiler nativo de Node.
-- Si necesitas ver el SQL real de un request lento, activa `LOG_SLOW_SQL=true` en `.env` y revisa los logs del backend en `/clientes`, `/lotes`, `/cuotas-pagadas`, `/cuotas-vencidas` y `/cobranzas`.
+- Si necesitas ver el SQL real de un request lento, activa `LOG_SLOW_SQL=true` en `.env` y revisa los logs del backend en `/clientes`, `/lotes`, `/cuotas-pagadas`, `/cuotas-vencidas`, `/cobranzas` y `/estado-cuentas`.
+
+### `GET /estado-cuentas`
+
+Devuelve clientes con contratos en atraso de 2 meses o mas, estado `Activo` o `Bloqueado`, y cuotas cuyo vencimiento tiene al menos un mes.
+
+Filtros principales:
+
+- `documento` o `numeroDocumento`: filtra por `DOCUMENTO` exacto.
+- `contrato` o `numeroContrato`: filtra por `CONTRATO` exacto.
+- `limit` o `limite`: tamano de pagina, default `100`.
+- `cursor`: siguiente pagina por cursor.
+- `offset`: paginacion tradicional.
+- `incluirTotal=true`: incluye `COUNT(*)`; por defecto queda apagado para responder mas rapido.
+
+Ejemplos:
+
+```bash
+curl -H "x-api-key: TU_API_KEY" "http://localhost:3000/estado-cuentas?documento=1234567"
+curl -H "x-api-key: TU_API_KEY" "http://localhost:3000/estado-cuentas?contrato=ABC123&limit=100"
+curl -H "x-api-key: TU_API_KEY" "http://localhost:3000/estado-cuentas?documento=1234567&contrato=ABC123"
+```
 
 ## Cache y diferidos
 
 Recomendación práctica:
 
-- usar cache para lecturas repetidas con exactamente los mismos filtros, especialmente en `/clientes`, `/lotes`, `/cuotas-pagadas`, `/cuotas-vencidas` y `/cobranzas`;
+- usar cache para lecturas repetidas con exactamente los mismos filtros, especialmente en `/clientes`, `/lotes`, `/cuotas-pagadas`, `/cuotas-vencidas`, `/cobranzas` y `/estado-cuentas`;
 - usar BullMQ solo para trabajo que no deba ejecutarse dentro del request HTTP, por ejemplo exportaciones grandes, recomputación de reportes, sincronizaciones o procesos batch.
 
 En esta API, cache probablemente te dé más impacto inmediato que BullMQ porque hoy la carga principal parece ser lectura directa desde Oracle.
 
-Mejoras aplicadas en endpoints paginados (`/clientes`, `/lotes`, `/cuotas-pagadas`, `/cuotas-vencidas`, `/cobranzas`):
+Mejoras aplicadas en endpoints paginados (`/clientes`, `/lotes`, `/cuotas-pagadas`, `/cuotas-vencidas`, `/cobranzas`, `/estado-cuentas`):
 
 - `incluirTotal` queda desactivado por defecto para evitar `COUNT(*)` en cada request;
 - hay cache TTL corto en memoria para requests repetidas con los mismos filtros;

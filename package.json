@@ -8,6 +8,7 @@
     "bench:lotes": "node scripts/run-autocannon.js lotes",
     "bench:cuotas-pagadas": "node scripts/run-autocannon.js cuotasPagadas",
     "bench:cuotas-vencidas": "node scripts/run-autocannon.js cuotasVencidas",
+    "bench:estado-cuentas": "node scripts/run-autocannon.js estadoCuentas",
     "prestart": "npm run build",
     "export:cobranzas": "node scripts/export-cobranzas-csv.js",
     "export:cuotas-pagadas": "node scripts/export-cuotas-pagadas-csv.js",
