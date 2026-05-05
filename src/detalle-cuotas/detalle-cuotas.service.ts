@@ -303,7 +303,7 @@ export class DetalleCuotasService {
         ccv.NUMERO_CUOTA,
         ccv.MONTO_CUOTA,
         CAST(NULL AS NUMBER) AS CUOTA_COBRADA,
-        CAST(NULL AS NUMBER) AS MORA_CUOTA
+        ccv.MORA_CUOTA
       FROM ADCC.CBI_CUOTAS_V ccv
       ${this.combinePendingWhere(pendingWhere)}
     `;
