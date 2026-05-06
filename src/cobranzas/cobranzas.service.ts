@@ -33,6 +33,8 @@ export class CobranzasService {
   private static readonly NULL_MESES_ATRASO_CURSOR = -1;
   private static readonly DEFAULT_MESES_ATRASO = 0;
   private static readonly ESTADOS_COBRANZAS = ['Activo', 'Bloqueado'];
+  private static readonly FEC_CONTRATO_BEFORE_CURRENT_MONTH =
+    "v.fecContrato < TRUNC(SYSDATE, 'MM')";
   private readonly logger = new Logger(CobranzasService.name);
   private readonly cache = new Map<string, CacheEntry<CobranzasResponse>>();
   private readonly inFlight = new Map<string, Promise<CobranzasResponse>>();
@@ -342,6 +344,7 @@ export class CobranzasService {
     qb.andWhere('v.estado IN (:...estadosCobranzas)', {
       estadosCobranzas: CobranzasService.ESTADOS_COBRANZAS,
     });
+    qb.andWhere(CobranzasService.FEC_CONTRATO_BEFORE_CURRENT_MONTH);
 
     if (dto.estado) {
       qb.andWhere('v.estado = :estado', {
