@@ -8,7 +8,7 @@ Backend en NestJS con adapter Fastify para consultar Oracle con o sin túnel SSH
 - Si SSH está habilitado, expone Oracle localmente a través de ese túnel.
 - Espera a que la ruta de conexión esté lista antes de crear el pool de TypeORM.
 - Si el túnel SSH está habilitado y se cae, intenta reconectar.
-- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `cuotas-pagadas`, `cuotas-vencidas`, `cobranzas` y `estado-cuentas`.
+- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `cuotas-pagadas`, `detalle-cuotas`, `cuotas-general`, `cuotas-vencidas`, `cobranzas`, `cobranzas-v2` y `estado-cuentas`.
 
 ## Stack
 
@@ -96,9 +96,19 @@ En producción:
 | `CUOTAS_VENCIDAS_CACHE_MAX_ITEMS` | `200` |
 | `COBRANZAS_CACHE_TTL_MS` | `15000` |
 | `COBRANZAS_CACHE_MAX_ITEMS` | `200` |
+| `COBRANZAS_V2_CACHE_TTL_MS` | `15000` |
+| `COBRANZAS_V2_CACHE_MAX_ITEMS` | `200` |
+| `DETALLE_CUOTAS_MAX_LIMIT` | `5000` |
+| `DETALLE_CUOTAS_CACHE_TTL_MS` | `15000` |
+| `DETALLE_CUOTAS_CACHE_MAX_ITEMS` | `200` |
+| `CUOTAS_GENERAL_MAX_LIMIT` | `5000` |
+| `CUOTAS_GENERAL_CACHE_TTL_MS` | `15000` |
+| `CUOTAS_GENERAL_CACHE_MAX_ITEMS` | `200` |
 | `ESTADO_CUENTAS_MAX_LIMIT` | `5000` |
 | `ESTADO_CUENTAS_CACHE_TTL_MS` | `15000` |
 | `ESTADO_CUENTAS_CACHE_MAX_ITEMS` | `200` |
+
+Las variables de cache y `*_MAX_LIMIT` son opcionales. Si no las definís, cada servicio usa sus valores por defecto.
 
 ## Seguridad
 
@@ -183,7 +193,7 @@ npm run profile:doctor:lotes
 Nota:
 - `clinic.js` es útil para diagnóstico, pero con Node 22 puede fallar o dar resultados inconsistentes.
 - Si eso pasa, conviene correr `clinic` con Node 20 LTS o usar `autocannon` junto con el profiler nativo de Node.
-- Si necesitas ver el SQL real de un request lento, activa `LOG_SLOW_SQL=true` en `.env` y revisa los logs del backend en `/clientes`, `/lotes`, `/cuotas-pagadas`, `/cuotas-vencidas`, `/cobranzas` y `/estado-cuentas`.
+- Si necesitas ver el SQL real de un request lento, activa `LOG_SLOW_SQL=true` en `.env` y revisa los logs del backend en `/clientes`, `/lotes`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2` y `/estado-cuentas`.
 
 ### `GET /estado-cuentas`
 
@@ -210,12 +220,12 @@ curl -H "x-api-key: TU_API_KEY" "http://localhost:3000/estado-cuentas?documento=
 
 Recomendación práctica:
 
-- usar cache para lecturas repetidas con exactamente los mismos filtros, especialmente en `/clientes`, `/lotes`, `/cuotas-pagadas`, `/cuotas-vencidas`, `/cobranzas` y `/estado-cuentas`;
+- usar cache para lecturas repetidas con exactamente los mismos filtros, especialmente en `/clientes`, `/lotes`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2` y `/estado-cuentas`;
 - usar BullMQ solo para trabajo que no deba ejecutarse dentro del request HTTP, por ejemplo exportaciones grandes, recomputación de reportes, sincronizaciones o procesos batch.
 
 En esta API, cache probablemente te dé más impacto inmediato que BullMQ porque hoy la carga principal parece ser lectura directa desde Oracle.
 
-Mejoras aplicadas en endpoints paginados (`/clientes`, `/lotes`, `/cuotas-pagadas`, `/cuotas-vencidas`, `/cobranzas`, `/estado-cuentas`):
+Mejoras aplicadas en endpoints paginados (`/clientes`, `/lotes`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`):
 
 - `incluirTotal` queda desactivado por defecto para evitar `COUNT(*)` en cada request;
 - hay cache TTL corto en memoria para requests repetidas con los mismos filtros;
@@ -409,6 +419,84 @@ GET /lotes?idFraccion=10&idManzana=4&sucursal=CDE&limite=100&offset=0
 GET /lotes?cliente=JUAN%20PEREZ&docIdentCliente=1234567&limite=20&offset=0
 ```
 
+### Detalle cuotas
+
+Ruta base:
+
+```text
+/detalle-cuotas
+```
+
+Parámetros principales:
+
+- `limit` o `limite`
+- `offset`
+- `incluirTotal`
+- `numeroContrato`
+- `numeroCuota`
+- `numeroCuotaDesde`
+- `numeroCuotaHasta`
+- `fechaVencimientoDesde`
+- `fechaVencimientoHasta`
+
+Ejemplos:
+
+```http
+GET /detalle-cuotas?numeroContrato=12345
+GET /detalle-cuotas?numeroContrato=12345&limit=50&offset=0
+GET /detalle-cuotas?fechaVencimientoDesde=2024-01-01&fechaVencimientoHasta=2024-12-31
+```
+
+Campos relevantes en la respuesta:
+
+- `moraCuota` ya viene incluida junto con `numeroContrato`, `fechaVencimiento`, `fechaPago`, `numeroCuota`, `montoCuota` y `cuotaCobrada`.
+
+### Cuotas general
+
+Ruta base:
+
+```text
+/cuotas-general
+```
+
+Parámetros principales:
+
+- `limit` o `limite`
+- `offset`
+- `incluirTotal`
+- `numeroContrato` o `contrato`
+- `documento`
+- `idCliente`
+- `idFraccion`
+- `idManzana`
+- `idLote`
+- `sucursal`
+- `numeroCuota`, `numeroCuotaDesde`, `numeroCuotaHasta`
+- `estadoActualContrato` o `estadoContrato`
+- `montoCuotaDesde`, `montoCuotaHasta`
+- `moraCuotaDesde`, `moraCuotaHasta`
+- `fechaVencimientoDesde`, `fechaVencimientoHasta`
+- `mesesMora`, `mesesMoraDesde`, `mesesMoraHasta`
+- `fechaPagoDesde`, `fechaPagoHasta`
+- `fecContratoDesde`, `fecContratoHasta`
+- `fecTratoDesde`, `fecTratoHasta`
+- `saldoVencidoDesde`, `saldoVencidoHasta`
+- `estadoCuota`
+- `vendedor`
+
+Ejemplos:
+
+```http
+GET /cuotas-general?numeroContrato=A3779
+GET /cuotas-general?documento=1234567&estadoCuota=VENCIDA&incluirTotal=true
+GET /cuotas-general?moraCuotaDesde=100000&fecContratoDesde=2024-01-01&fecContratoHasta=2024-12-31
+```
+
+Notas:
+
+- `cuotas-general` concentra filtros contractuales, comerciales y de mora en un solo endpoint de consulta.
+- `limit` queda topado por `CUOTAS_GENERAL_MAX_LIMIT`.
+
 ### Cuotas vencidas
 
 Ruta base:
@@ -492,6 +580,7 @@ Parámetros principales:
 - `offset`
 - `incluirTotal`
 - `estado`
+- `mesesAtraso`
 - `mesesAtrasoDesde`
 - `mesesAtrasoHasta`
 
@@ -502,12 +591,19 @@ Orden actual:
 - `contrato ASC`
 - `cuota ASC`
 
+Reglas de negocio aplicadas por el servicio:
+
+- solo devuelve registros con `estado` dentro de `Activo` o `Bloqueado`;
+- solo considera contratos con `fecContrato < TRUNC(SYSDATE, 'MM')`;
+- si no enviás `mesesAtraso`, `mesesAtrasoDesde` ni `mesesAtrasoHasta`, el filtro por defecto es `mesesAtraso=0`.
+
 Ejemplos:
 
 ```http
 GET /cobranzas?limit=100
 GET /cobranzas?limit=100&cursor=<nextCursor>
-GET /cobranzas?estado=VENCIDO&limit=100
+GET /cobranzas?estado=Activo&limit=100
+GET /cobranzas?mesesAtraso=0&limit=100
 GET /cobranzas?mesesAtrasoDesde=3&mesesAtrasoHasta=12&limit=100
 GET /cobranzas?incluirTotal=true&offset=0&limit=100
 ```
@@ -530,9 +626,44 @@ Respuesta típica con cursor:
 }
 ```
 
+### Cobranzas v2
+
+Ruta base:
+
+```text
+/cobranzas-v2
+```
+
+Parámetros principales:
+
+- `limit` o `limite`
+- `cursor`
+- `offset`
+- `incluirTotal`
+- `contrato`
+- `cobrador`
+- `empresa`
+- `estado`
+- `mesesAtraso`
+- `mesesAtrasoDesde`
+- `mesesAtrasoHasta`
+
+Ejemplos:
+
+```http
+GET /cobranzas-v2?limit=100
+GET /cobranzas-v2?cobrador=JUAN%20PEREZ&limit=100
+GET /cobranzas-v2?empresa=INMO&mesesAtrasoDesde=1&mesesAtrasoHasta=6
+```
+
+Notas:
+
+- `cobranzas-v2` agrega filtros puntuales por `cobrador` y `empresa`.
+- mantiene el mismo esquema de respuesta paginada con `cursor` recomendado para volúmenes grandes.
+
 ## Paginación y rendimiento
 
-`clientes`, `lotes` y `cuotas-pagadas` soportan paginación por `offset`. `cuotas-vencidas` y `cobranzas` usan `cursor` como mecanismo recomendado y mantienen `offset` solo por compatibilidad.
+`clientes`, `lotes`, `cuotas-pagadas`, `detalle-cuotas` y `cuotas-general` soportan paginación por `offset`. `estado-cuentas`, `cuotas-vencidas`, `cobranzas` y `cobranzas-v2` usan `cursor` como mecanismo recomendado y mantienen `offset` solo por compatibilidad.
 
 Recomendaciones:
 
@@ -540,7 +671,7 @@ Recomendaciones:
 - evitar `COUNT(*)` cuando no haga falta,
 - preferir `incluirTotal=false` en vistas grandes.
 
-En `cuotas-vencidas` y `cobranzas`, `incluirTotal` queda desactivado por defecto para responder más rápido en consultas grandes.
+En `estado-cuentas`, `cuotas-vencidas`, `cobranzas`, `cobranzas-v2`, `detalle-cuotas` y `cuotas-general`, `incluirTotal` queda desactivado por defecto para responder más rápido en consultas grandes.
 
 ## Desarrollo de nuevos módulos
 
