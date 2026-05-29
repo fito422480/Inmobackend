@@ -1,0 +1,94 @@
+export class CuotasGeneralQueryDto {
+  limite?: number;
+  offset?: number;
+  incluirTotal?: boolean;
+  idFraccion?: number;
+  nombreFraccion?: string;
+  idManzana?: number;
+  idLote?: number;
+  numeroContrato?: string;
+  sucursal?: string;
+  nombreParaDocumento?: string;
+  idCliente?: number;
+  documento?: string;
+  numeroCuota?: number;
+  numeroCuotaDesde?: number;
+  numeroCuotaHasta?: number;
+  totalCuotas?: number;
+  estadoActualContrato?: string;
+  montoCuotaDesde?: number;
+  montoCuotaHasta?: number;
+  moraCuotaDesde?: number;
+  moraCuotaHasta?: number;
+  fechaVencimientoDesde?: string;
+  fechaVencimientoHasta?: string;
+  mesesMora?: number;
+  mesesMoraDesde?: number;
+  mesesMoraHasta?: number;
+  fechaPagoDesde?: string;
+  fechaPagoHasta?: string;
+  moneda?: string;
+  nroFactura?: string;
+  formaPago?: string;
+  fecContratoDesde?: string;
+  fecContratoHasta?: string;
+  fecTratoDesde?: string;
+  fecTratoHasta?: string;
+  vendedor?: string;
+  planPagoVendedor?: string;
+  refinanciacion?: string;
+  cancelacionAnticipada?: string;
+  saldoVencidoDesde?: number;
+  saldoVencidoHasta?: number;
+  ultimoPagoDesde?: string;
+  ultimoPagoHasta?: string;
+  estadoCuota?: string;
+}
+
+export class CuotaGeneralDto {
+  idFraccion: number | null;
+  nombreFraccion: string | null;
+  idManzana: number | null;
+  idLote: number | null;
+  numeroContrato: string | null;
+  sucursal: string | null;
+  nombreParaDocumento: string | null;
+  idCliente: number | null;
+  documento: string | null;
+  numeroCuota: number | null;
+  totalCuotas: number | null;
+  estadoActualContrato: string | null;
+  montoCuota: number | null;
+  moraCuota: number | null;
+  fechaVencimiento: Date | string | null;
+  mesesMora: number | null;
+  interesCobrado: number | null;
+  descuentoInteres: number | null;
+  cuotaCobrada: number | null;
+  notaCred: number | null;
+  telefonoCelular: string | null;
+  fechaPago: Date | string | null;
+  moneda: string | null;
+  nroFactura: string | null;
+  formaPago: string | null;
+  fecContrato: Date | string | null;
+  fecTrato: Date | string | null;
+  vendedor: string | null;
+  planPagoVendedor: string | null;
+  refinanciacion: string | null;
+  cancelacionAnticipada: string | null;
+  saldoVencido: number | null;
+  ultimoPago: Date | string | null;
+  estadoCuota: string | null;
+}
+
+export class CuotasGeneralResponseDto<T> {
+  data: T[];
+  total: number | null;
+  limite: number;
+  offset: number;
+  pagina: number;
+  totalPaginas: number | null;
+  incluirTotal: boolean;
+  tieneMas?: boolean;
+}
