@@ -8,7 +8,7 @@ Backend en NestJS con adapter Fastify para consultar Oracle con o sin túnel SSH
 - Si SSH está habilitado, expone Oracle localmente a través de ese túnel.
 - Espera a que la ruta de conexión esté lista antes de crear el pool de TypeORM.
 - Si el túnel SSH está habilitado y se cae, intenta reconectar.
-- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `cuotas-pagadas`, `detalle-cuotas`, `cuotas-general`, `cuotas-vencidas`, `cobranzas`, `cobranzas-v2` y `estado-cuentas`.
+- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `cuotas-pagadas`, `detalle-cuotas`, `cuotas-general`, `cuotas-vencidas`, `cobranzas`, `cobranzas-v2`, `estado-cuentas` y `total-pagado`.
 
 ## Stack
 
@@ -107,6 +107,8 @@ En producción:
 | `ESTADO_CUENTAS_MAX_LIMIT` | `5000` |
 | `ESTADO_CUENTAS_CACHE_TTL_MS` | `15000` |
 | `ESTADO_CUENTAS_CACHE_MAX_ITEMS` | `200` |
+| `TOTAL_PAGADO_CACHE_TTL_MS` | `15000` |
+| `TOTAL_PAGADO_CACHE_MAX_ITEMS` | `200` |
 
 Las variables de cache y `*_MAX_LIMIT` son opcionales. Si no las definís, cada servicio usa sus valores por defecto.
 
@@ -193,7 +195,7 @@ npm run profile:doctor:lotes
 Nota:
 - `clinic.js` es útil para diagnóstico, pero con Node 22 puede fallar o dar resultados inconsistentes.
 - Si eso pasa, conviene correr `clinic` con Node 20 LTS o usar `autocannon` junto con el profiler nativo de Node.
-- Si necesitas ver el SQL real de un request lento, activa `LOG_SLOW_SQL=true` en `.env` y revisa los logs del backend en `/clientes`, `/lotes`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2` y `/estado-cuentas`.
+- Si necesitas ver el SQL real de un request lento, activa `LOG_SLOW_SQL=true` en `.env` y revisa los logs del backend en `/clientes`, `/lotes`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas` y `/total-pagado`.
 
 ### `GET /estado-cuentas`
 
@@ -220,12 +222,12 @@ curl -H "x-api-key: TU_API_KEY" "http://localhost:3000/estado-cuentas?documento=
 
 Recomendación práctica:
 
-- usar cache para lecturas repetidas con exactamente los mismos filtros, especialmente en `/clientes`, `/lotes`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2` y `/estado-cuentas`;
+- usar cache para lecturas repetidas con exactamente los mismos filtros, especialmente en `/clientes`, `/lotes`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas` y `/total-pagado`;
 - usar BullMQ solo para trabajo que no deba ejecutarse dentro del request HTTP, por ejemplo exportaciones grandes, recomputación de reportes, sincronizaciones o procesos batch.
 
 En esta API, cache probablemente te dé más impacto inmediato que BullMQ porque hoy la carga principal parece ser lectura directa desde Oracle.
 
-Mejoras aplicadas en endpoints paginados (`/clientes`, `/lotes`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`):
+Mejoras aplicadas en endpoints paginados (`/clientes`, `/lotes`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`):
 
 - `incluirTotal` queda desactivado por defecto para evitar `COUNT(*)` en cada request;
 - hay cache TTL corto en memoria para requests repetidas con los mismos filtros;
@@ -417,6 +419,37 @@ GET /lotes?idLote=1234
 GET /lotes?numeroContrato=00012345&limite=50&offset=0
 GET /lotes?idFraccion=10&idManzana=4&sucursal=CDE&limite=100&offset=0
 GET /lotes?cliente=JUAN%20PEREZ&docIdentCliente=1234567&limite=20&offset=0
+```
+
+### Total pagado
+
+Ruta base:
+
+```text
+/total-pagado
+```
+
+Qué devuelve:
+
+- resumen diario agrupado por `TRUNC(FECHA_PAGO)`;
+- columnas `fecha`, `mes`, `dia`, `totalPagado`, `totalPagadoReal`, `notaCredito` y `totalInteres`;
+- por defecto aplica `NUMERO_CUOTA > 1`, equivalente a la query base del reporte.
+
+Parámetros principales:
+
+- `limit` o `limite`
+- `offset`
+- `incluirTotal`
+- `fechaDesde`
+- `fechaHasta`
+- `numeroCuotaMinima`
+
+Ejemplos:
+
+```http
+GET /total-pagado?fechaDesde=2026-05-01
+GET /total-pagado?fechaDesde=2026-05-01&fechaHasta=2026-05-31
+GET /total-pagado?fechaDesde=2026-05-01&numeroCuotaMinima=1&incluirTotal=true
 ```
 
 ### Detalle cuotas
@@ -663,7 +696,7 @@ Notas:
 
 ## Paginación y rendimiento
 
-`clientes`, `lotes`, `cuotas-pagadas`, `detalle-cuotas` y `cuotas-general` soportan paginación por `offset`. `estado-cuentas`, `cuotas-vencidas`, `cobranzas` y `cobranzas-v2` usan `cursor` como mecanismo recomendado y mantienen `offset` solo por compatibilidad.
+`clientes`, `lotes`, `cuotas-pagadas`, `total-pagado`, `detalle-cuotas` y `cuotas-general` soportan paginación por `offset`. `estado-cuentas`, `cuotas-vencidas`, `cobranzas` y `cobranzas-v2` usan `cursor` como mecanismo recomendado y mantienen `offset` solo por compatibilidad.
 
 Recomendaciones:
 
