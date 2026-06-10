@@ -15,6 +15,7 @@ import { CuotasGeneralModule } from './cuotas-general/cuotas-general.module';
 import { EstadoCuentasModule } from './estado-cuentas/estado-cuentas.module';
 import { LotesModule } from './lotes/lotes.module';
 import { PagosPorFranjaModule } from './pagos-por-franja/pagos-por-franja.module';
+import { TotalPagadoMesModule } from './total-pagado-mes/total-pagado-mes.module';
 import { TotalPagadoModule } from './total-pagado/total-pagado.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -34,6 +35,7 @@ import { AppService } from './app.service';
     EstadoCuentasModule,
     LotesModule,
     PagosPorFranjaModule,
+    TotalPagadoMesModule,
     TotalPagadoModule,
   ],
   controllers: [AppController],
