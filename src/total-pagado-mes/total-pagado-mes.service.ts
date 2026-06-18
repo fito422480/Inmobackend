@@ -3,10 +3,10 @@ import {
   Injectable,
   Logger,
   ServiceUnavailableException,
-} from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder } from 'typeorm';
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository, SelectQueryBuilder } from "typeorm";
 import {
   buildStableCacheKey,
   CacheEntry,
@@ -17,13 +17,13 @@ import {
   parsePositiveNumber,
   QueryDebugSnapshot,
   setCacheValue,
-} from '../common/query-performance.util';
+} from "../common/query-performance.util";
 import {
   TotalPagadoMesItemDto,
   TotalPagadoMesQueryDto,
   TotalPagadoMesResponseDto,
-} from './total-pagado-mes.dto';
-import { TotalPagadoMesEntity } from './total-pagado-mes.entity';
+} from "./total-pagado-mes.dto";
+import { TotalPagadoMesEntity } from "./total-pagado-mes.entity";
 
 type TotalPagadoMesResponse = TotalPagadoMesResponseDto<TotalPagadoMesItemDto>;
 
@@ -43,7 +43,10 @@ export class TotalPagadoMesService {
     string,
     CacheEntry<TotalPagadoMesResponse>
   >();
-  private readonly inFlight = new Map<string, Promise<TotalPagadoMesResponse>>();
+  private readonly inFlight = new Map<
+    string,
+    Promise<TotalPagadoMesResponse>
+  >();
   private readonly cacheTtlMs: number;
   private readonly cacheMaxItems: number;
   private readonly logSlowSql: boolean;
@@ -54,14 +57,14 @@ export class TotalPagadoMesService {
     private readonly configService: ConfigService,
   ) {
     this.cacheTtlMs = parsePositiveNumber(
-      this.configService.get('TOTAL_PAGADO_MES_CACHE_TTL_MS'),
+      this.configService.get("TOTAL_PAGADO_MES_CACHE_TTL_MS"),
       15000,
     );
     this.cacheMaxItems = parsePositiveNumber(
-      this.configService.get('TOTAL_PAGADO_MES_CACHE_MAX_ITEMS'),
+      this.configService.get("TOTAL_PAGADO_MES_CACHE_MAX_ITEMS"),
       200,
     );
-    this.logSlowSql = this.configService.get('LOG_SLOW_SQL') === 'true';
+    this.logSlowSql = this.configService.get("LOG_SLOW_SQL") === "true";
   }
 
   async findAll(dto: TotalPagadoMesQueryDto): Promise<TotalPagadoMesResponse> {
@@ -102,7 +105,7 @@ export class TotalPagadoMesService {
     }
 
     const loadPromise = (async () => {
-      const baseQb = this.repo.createQueryBuilder('v');
+      const baseQb = this.repo.createQueryBuilder("v");
       this.applyFilters(baseQb, normalizedDto);
 
       if (!incluirTotal) {
@@ -110,7 +113,7 @@ export class TotalPagadoMesService {
           .skip(offset)
           .take(limite + 1);
         const querySnapshots = [
-          captureQuerySnapshot('data', dataQb),
+          captureQuerySnapshot("data", dataQb),
         ] as QueryDebugSnapshot[];
         const dataResult = await measureAsync(() =>
           dataQb.getRawMany<TotalPagadoMesRawRow>(),
@@ -144,9 +147,9 @@ export class TotalPagadoMesService {
           incluirTotal: false,
           rows: response.data.length,
           filters: countActiveFilters(normalizedRecord, [
-            'limite',
-            'offset',
-            'incluirTotal',
+            "limite",
+            "offset",
+            "incluirTotal",
           ]),
           querySnapshots,
         });
@@ -158,14 +161,14 @@ export class TotalPagadoMesService {
         .clone()
         .select(
           "COUNT(DISTINCT TO_CHAR(TRUNC(v.fechaPago, 'MM'), 'YYYY-MM'))",
-          'total',
+          "total",
         );
       const dataQb = this.buildSummaryQuery(baseQb.clone())
         .skip(offset)
         .take(limite);
       const querySnapshots = [
-        captureQuerySnapshot('count', countQb),
-        captureQuerySnapshot('data', dataQb),
+        captureQuerySnapshot("count", countQb),
+        captureQuerySnapshot("data", dataQb),
       ] as QueryDebugSnapshot[];
 
       const [countResult, dataResult] = await Promise.all([
@@ -202,9 +205,9 @@ export class TotalPagadoMesService {
         incluirTotal: true,
         rows: response.data.length,
         filters: countActiveFilters(normalizedRecord, [
-          'limite',
-          'offset',
-          'incluirTotal',
+          "limite",
+          "offset",
+          "incluirTotal",
         ]),
         querySnapshots,
       });
@@ -228,7 +231,7 @@ export class TotalPagadoMesService {
     qb: SelectQueryBuilder<TotalPagadoMesEntity>,
     dto: TotalPagadoMesQueryDto,
   ) {
-    qb.where('v.numeroCuota > :numeroCuotaMinima', {
+    qb.where("v.numeroCuota > :numeroCuotaMinima", {
       numeroCuotaMinima: dto.numeroCuotaMinima ?? 1,
     });
 
@@ -245,23 +248,24 @@ export class TotalPagadoMesService {
     }
   }
 
-  private buildSummaryQuery(
-    qb: SelectQueryBuilder<TotalPagadoMesEntity>,
-  ) {
+  private buildSummaryQuery(qb: SelectQueryBuilder<TotalPagadoMesEntity>) {
     return qb
-      .select('EXTRACT(YEAR FROM v.fechaPago)', 'anio')
-      .addSelect('EXTRACT(MONTH FROM v.fechaPago)', 'mes')
-      .addSelect('CEIL(SUM(NVL(v.cuotaCobrada, 0)))', 'totalPagado')
+      .select("EXTRACT(YEAR FROM v.fechaPago)", "anio")
+      .addSelect("EXTRACT(MONTH FROM v.fechaPago)", "mes")
+      .addSelect("CEIL(SUM(NVL(v.cuotaCobrada, 0)))", "totalPagado")
       .addSelect(
-        'CEIL(SUM(NVL(v.montoCuota, 0) - NVL(v.notaCred, 0)))',
-        'totalPagadoReal',
+        "CEIL(SUM(NVL(v.montoCuota, 0) - NVL(v.notaCred, 0)))",
+        "totalPagadoReal",
       )
-      .addSelect('CEIL(SUM(NVL(v.notaCred, 0)))', 'notaCredito')
-      .addSelect('CEIL(SUM(NVL(v.interesCobrado, 0)))', 'totalInteres')
-      .groupBy('EXTRACT(YEAR FROM v.fechaPago)')
-      .addGroupBy('EXTRACT(MONTH FROM v.fechaPago)')
-      .orderBy('EXTRACT(YEAR FROM v.fechaPago)', 'ASC')
-      .addOrderBy('EXTRACT(MONTH FROM v.fechaPago)', 'ASC');
+      .addSelect("CEIL(SUM(NVL(v.notaCred, 0)))", "notaCredito")
+      .addSelect(
+        "CEIL(SUM(NVL(v.interesCobrado,0) - NVL(v.descuentoInteres, 0)))",
+        "totalInteres",
+      )
+      .groupBy("EXTRACT(YEAR FROM v.fechaPago)")
+      .addGroupBy("EXTRACT(MONTH FROM v.fechaPago)")
+      .orderBy("EXTRACT(YEAR FROM v.fechaPago)", "ASC")
+      .addOrderBy("EXTRACT(MONTH FROM v.fechaPago)", "ASC");
   }
 
   private mapRows(rows: TotalPagadoMesRawRow[]): TotalPagadoMesItemDto[] {
@@ -276,16 +280,16 @@ export class TotalPagadoMesService {
   }
 
   private normalizeNumber(value: unknown): number {
-    if (value === null || value === undefined || value === '') {
+    if (value === null || value === undefined || value === "") {
       return 0;
     }
 
-    if (typeof value === 'number') {
+    if (typeof value === "number") {
       return Number.isFinite(value) ? value : 0;
     }
 
-    if (typeof value === 'string') {
-      const normalized = value.trim().replace(',', '.');
+    if (typeof value === "string") {
+      const normalized = value.trim().replace(",", ".");
       const parsed = Number(normalized);
       return Number.isFinite(parsed) ? parsed : 0;
     }
@@ -296,15 +300,15 @@ export class TotalPagadoMesService {
   private validateDto(dto: TotalPagadoMesQueryDto) {
     if (dto.numeroCuotaMinima !== undefined && dto.numeroCuotaMinima < 0) {
       throw new BadRequestException(
-        'numeroCuotaMinima no puede ser menor que 0',
+        "numeroCuotaMinima no puede ser menor que 0",
       );
     }
 
     this.validateDateRange(
       dto.fechaDesde,
       dto.fechaHasta,
-      'fechaDesde',
-      'fechaHasta',
+      "fechaDesde",
+      "fechaHasta",
     );
   }
 
@@ -393,12 +397,12 @@ export class TotalPagadoMesService {
     const code = this.extractOracleErrorCode(error);
     const message = error instanceof Error ? error.message : String(error);
 
-    if (code === 'ORA-04045' || code === 'ORA-16000') {
+    if (code === "ORA-04045" || code === "ORA-16000") {
       this.logger.error(
         `total-pagado-mes source unavailable code=${code} message=${message}`,
       );
       throw new ServiceUnavailableException(
-        'La fuente Oracle ADCC.CBI_CUOTAS_PAGADAS_V esta invalida y no puede revalidarse porque la base esta en modo read-only. Debe corregirse o recompilarse en origen.',
+        "La fuente Oracle ADCC.CBI_CUOTAS_PAGADAS_V esta invalida y no puede revalidarse porque la base esta en modo read-only. Debe corregirse o recompilarse en origen.",
       );
     }
 
@@ -406,16 +410,19 @@ export class TotalPagadoMesService {
   }
 
   private extractOracleErrorCode(error: unknown): string | null {
-    if (!error || typeof error !== 'object') {
+    if (!error || typeof error !== "object") {
       return null;
     }
 
     const candidate = error as { code?: unknown; message?: unknown };
-    if (typeof candidate.code === 'string' && candidate.code.startsWith('ORA-')) {
+    if (
+      typeof candidate.code === "string" &&
+      candidate.code.startsWith("ORA-")
+    ) {
       return candidate.code;
     }
 
-    if (typeof candidate.message === 'string') {
+    if (typeof candidate.message === "string") {
       const match = candidate.message.match(/ORA-\d{5}/);
       return match?.[0] ?? null;
     }

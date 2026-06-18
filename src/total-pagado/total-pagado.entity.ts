@@ -19,4 +19,8 @@ export class TotalPagadoEntity {
 
   @ViewColumn({ name: 'INTERES_COBRADO' })
   interesCobrado: number;
+
+  @ViewColumn({ name: "DESCUENTO_INTERES" })
+  descuentoInteres: number;
+
 }

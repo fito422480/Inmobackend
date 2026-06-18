@@ -8,7 +8,7 @@ Backend en NestJS con adapter Fastify para consultar Oracle con o sin túnel SSH
 - Si SSH está habilitado, expone Oracle localmente a través de ese túnel.
 - Espera a que la ruta de conexión esté lista antes de crear el pool de TypeORM.
 - Si el túnel SSH está habilitado y se cae, intenta reconectar.
-- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `cuotas-pagadas`, `detalle-cuotas`, `cuotas-general`, `cuotas-vencidas`, `cobranzas`, `cobranzas-v2`, `estado-cuentas`, `total-pagado`, `total-pagado-mes` y `pagos-por-franja`.
+- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `fracciones`, `cuotas-pagadas`, `detalle-cuotas`, `cuotas-general`, `cuotas-vencidas`, `cobranzas`, `cobranzas-v2`, `estado-cuentas`, `total-pagado`, `total-pagado-mes` y `pagos-por-franja`.
 
 ## Stack
 
@@ -90,6 +90,8 @@ En producción:
 | `CLIENTES_CACHE_MAX_ITEMS` | `200` |
 | `LOTES_CACHE_TTL_MS` | `15000` |
 | `LOTES_CACHE_MAX_ITEMS` | `200` |
+| `FRACCIONES_CACHE_TTL_MS` | `15000` |
+| `FRACCIONES_CACHE_MAX_ITEMS` | `200` |
 | `CUOTAS_PAGADAS_CACHE_TTL_MS` | `15000` |
 | `CUOTAS_PAGADAS_CACHE_MAX_ITEMS` | `200` |
 | `CUOTAS_VENCIDAS_CACHE_TTL_MS` | `15000` |
@@ -200,7 +202,7 @@ npm run profile:doctor:lotes
 Nota:
 - `clinic.js` es útil para diagnóstico, pero con Node 22 puede fallar o dar resultados inconsistentes.
 - Si eso pasa, conviene correr `clinic` con Node 20 LTS o usar `autocannon` junto con el profiler nativo de Node.
-- Si necesitas ver el SQL real de un request lento, activa `LOG_SLOW_SQL=true` en `.env` y revisa los logs del backend en `/clientes`, `/lotes`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`, `/total-pagado-mes` y `/pagos-por-franja`.
+- Si necesitas ver el SQL real de un request lento, activa `LOG_SLOW_SQL=true` en `.env` y revisa los logs del backend en `/clientes`, `/lotes`, `/fracciones`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`, `/total-pagado-mes` y `/pagos-por-franja`.
 
 ### `GET /estado-cuentas`
 
@@ -227,12 +229,12 @@ curl -H "x-api-key: TU_API_KEY" "http://localhost:3000/estado-cuentas?documento=
 
 Recomendación práctica:
 
-- usar cache para lecturas repetidas con exactamente los mismos filtros, especialmente en `/clientes`, `/lotes`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`, `/total-pagado-mes` y `/pagos-por-franja`;
+- usar cache para lecturas repetidas con exactamente los mismos filtros, especialmente en `/clientes`, `/lotes`, `/fracciones`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`, `/total-pagado-mes` y `/pagos-por-franja`;
 - usar BullMQ solo para trabajo que no deba ejecutarse dentro del request HTTP, por ejemplo exportaciones grandes, recomputación de reportes, sincronizaciones o procesos batch.
 
 En esta API, cache probablemente te dé más impacto inmediato que BullMQ porque hoy la carga principal parece ser lectura directa desde Oracle.
 
-Mejoras aplicadas en endpoints paginados (`/clientes`, `/lotes`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`, `/total-pagado-mes`, `/pagos-por-franja`):
+Mejoras aplicadas en endpoints paginados (`/clientes`, `/lotes`, `/fracciones`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`, `/total-pagado-mes`, `/pagos-por-franja`):
 
 - `incluirTotal` queda desactivado por defecto para evitar `COUNT(*)` en cada request;
 - hay cache TTL corto en memoria para requests repetidas con los mismos filtros;
@@ -424,6 +426,34 @@ GET /lotes?idLote=1234
 GET /lotes?numeroContrato=00012345&limite=50&offset=0
 GET /lotes?idFraccion=10&idManzana=4&sucursal=CDE&limite=100&offset=0
 GET /lotes?cliente=JUAN%20PEREZ&docIdentCliente=1234567&limite=20&offset=0
+```
+
+### Fracciones
+
+Ruta base:
+
+```text
+/fracciones
+```
+
+Que devuelve:
+
+- fracciones activas con disponibilidad mayor a cero desde `ADCC.CBI_FRACCIONES_V`;
+- columnas `ciudad`, `fraccion` y `disponibles`;
+- `ciudad` y `fraccion` se devuelven en mayusculas, equivalente a `UPPER(CIUDAD)` y `UPPER(NOMBRE_FRACCION)`;
+- ordenado por ciudad y fraccion.
+
+Parámetros principales:
+
+- `limit` o `limite`
+- `offset`
+- `incluirTotal`
+
+Ejemplos:
+
+```http
+GET /fracciones?limite=100&offset=0
+GET /fracciones?limite=100&offset=0&incluirTotal=true
 ```
 
 ### Total pagado
@@ -768,7 +798,7 @@ Notas:
 
 ## Paginación y rendimiento
 
-`clientes`, `lotes`, `cuotas-pagadas`, `total-pagado`, `total-pagado-mes`, `pagos-por-franja`, `detalle-cuotas` y `cuotas-general` soportan paginación por `offset`. `estado-cuentas`, `cuotas-vencidas`, `cobranzas` y `cobranzas-v2` usan `cursor` como mecanismo recomendado y mantienen `offset` solo por compatibilidad.
+`clientes`, `lotes`, `fracciones`, `cuotas-pagadas`, `total-pagado`, `total-pagado-mes`, `pagos-por-franja`, `detalle-cuotas` y `cuotas-general` soportan paginación por `offset`. `estado-cuentas`, `cuotas-vencidas`, `cobranzas` y `cobranzas-v2` usan `cursor` como mecanismo recomendado y mantienen `offset` solo por compatibilidad.
 
 Recomendaciones:
 
@@ -776,7 +806,7 @@ Recomendaciones:
 - evitar `COUNT(*)` cuando no haga falta,
 - preferir `incluirTotal=false` en vistas grandes.
 
-En `estado-cuentas`, `cuotas-vencidas`, `cobranzas`, `cobranzas-v2`, `detalle-cuotas`, `cuotas-general`, `total-pagado`, `total-pagado-mes` y `pagos-por-franja`, `incluirTotal` queda desactivado por defecto para responder mas rapido en consultas grandes.
+En `estado-cuentas`, `cuotas-vencidas`, `cobranzas`, `cobranzas-v2`, `detalle-cuotas`, `cuotas-general`, `fracciones`, `total-pagado`, `total-pagado-mes` y `pagos-por-franja`, `incluirTotal` queda desactivado por defecto para responder mas rapido en consultas grandes.
 
 ## Desarrollo de nuevos módulos
 

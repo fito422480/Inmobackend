@@ -238,20 +238,23 @@ export class TotalPagadoService {
 
   private buildSummaryQuery(qb: SelectQueryBuilder<TotalPagadoEntity>) {
     return qb
-      .select("TO_CHAR(TRUNC(v.fechaPago), 'YYYY-MM-DD')", 'fecha')
-      .addSelect('EXTRACT(MONTH FROM v.fechaPago)', 'mes')
-      .addSelect('EXTRACT(DAY FROM v.fechaPago)', 'dia')
-      .addSelect('CEIL(SUM(NVL(v.cuotaCobrada, 0)))', 'totalPagado')
+      .select("TO_CHAR(TRUNC(v.fechaPago), 'YYYY-MM-DD')", "fecha")
+      .addSelect("EXTRACT(MONTH FROM v.fechaPago)", "mes")
+      .addSelect("EXTRACT(DAY FROM v.fechaPago)", "dia")
+      .addSelect("CEIL(SUM(NVL(v.cuotaCobrada, 0)))", "totalPagado")
       .addSelect(
-        'CEIL(SUM(NVL(v.montoCuota, 0) - NVL(v.notaCred, 0)))',
-        'totalPagadoReal',
+        "CEIL(SUM(NVL(v.montoCuota, 0) - NVL(v.notaCred, 0)))",
+        "totalPagadoReal",
       )
-      .addSelect('CEIL(SUM(NVL(v.notaCred, 0)))', 'notaCredito')
-      .addSelect('CEIL(SUM(NVL(v.interesCobrado, 0)))', 'totalInteres')
-      .groupBy('TRUNC(v.fechaPago)')
-      .addGroupBy('EXTRACT(MONTH FROM v.fechaPago)')
-      .addGroupBy('EXTRACT(DAY FROM v.fechaPago)')
-      .orderBy('TRUNC(v.fechaPago)', 'ASC');
+      .addSelect("CEIL(SUM(NVL(v.notaCred, 0)))", "notaCredito")
+      .addSelect(
+        "CEIL(SUM(NVL(v.interesCobrado, 0) - NVL(v.descuentoInteres, 0)))",
+        "totalInteres",
+      )
+      .groupBy("TRUNC(v.fechaPago)")
+      .addGroupBy("EXTRACT(MONTH FROM v.fechaPago)")
+      .addGroupBy("EXTRACT(DAY FROM v.fechaPago)")
+      .orderBy("TRUNC(v.fechaPago)", "ASC");
   }
 
   private mapRows(rows: TotalPagadoRawRow[]): TotalPagadoItemDto[] {
