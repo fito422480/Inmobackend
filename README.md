@@ -8,7 +8,7 @@ Backend en NestJS con adapter Fastify para consultar Oracle con o sin túnel SSH
 - Si SSH está habilitado, expone Oracle localmente a través de ese túnel.
 - Espera a que la ruta de conexión esté lista antes de crear el pool de TypeORM.
 - Si el túnel SSH está habilitado y se cae, intenta reconectar.
-- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `fracciones`, `cuotas-pagadas`, `detalle-cuotas`, `cuotas-general`, `cuotas-vencidas`, `cobranzas`, `cobranzas-v2`, `estado-cuentas`, `total-pagado`, `total-pagado-mes` y `pagos-por-franja`.
+- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `fracciones`, `cuotas-pagadas`, `detalle-cuotas`, `cuotas-general`, `cuotas-vencidas`, `cobranzas`, `cobranzas-v2`, `estado-cuentas`, `total-pagado`, `total-pagado-mes`, `recupero` y `pagos-por-franja`.
 
 ## Stack
 
@@ -113,6 +113,9 @@ En producción:
 | `TOTAL_PAGADO_CACHE_MAX_ITEMS` | `200` |
 | `TOTAL_PAGADO_MES_CACHE_TTL_MS` | `15000` |
 | `TOTAL_PAGADO_MES_CACHE_MAX_ITEMS` | `200` |
+| `RECUPERO_MAX_LIMIT` | `5000` |
+| `RECUPERO_CACHE_TTL_MS` | `15000` |
+| `RECUPERO_CACHE_MAX_ITEMS` | `200` |
 | `PAGOS_POR_FRANJA_MAX_LIMIT` | `5000` |
 | `PAGOS_POR_FRANJA_CACHE_TTL_MS` | `15000` |
 | `PAGOS_POR_FRANJA_CACHE_MAX_ITEMS` | `200` |
@@ -202,7 +205,7 @@ npm run profile:doctor:lotes
 Nota:
 - `clinic.js` es útil para diagnóstico, pero con Node 22 puede fallar o dar resultados inconsistentes.
 - Si eso pasa, conviene correr `clinic` con Node 20 LTS o usar `autocannon` junto con el profiler nativo de Node.
-- Si necesitas ver el SQL real de un request lento, activa `LOG_SLOW_SQL=true` en `.env` y revisa los logs del backend en `/clientes`, `/lotes`, `/fracciones`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`, `/total-pagado-mes` y `/pagos-por-franja`.
+- Si necesitas ver el SQL real de un request lento, activa `LOG_SLOW_SQL=true` en `.env` y revisa los logs del backend en `/clientes`, `/lotes`, `/fracciones`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`, `/total-pagado-mes`, `/recupero` y `/pagos-por-franja`.
 
 ### `GET /estado-cuentas`
 
@@ -229,12 +232,12 @@ curl -H "x-api-key: TU_API_KEY" "http://localhost:3000/estado-cuentas?documento=
 
 Recomendación práctica:
 
-- usar cache para lecturas repetidas con exactamente los mismos filtros, especialmente en `/clientes`, `/lotes`, `/fracciones`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`, `/total-pagado-mes` y `/pagos-por-franja`;
+- usar cache para lecturas repetidas con exactamente los mismos filtros, especialmente en `/clientes`, `/lotes`, `/fracciones`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`, `/total-pagado-mes`, `/recupero` y `/pagos-por-franja`;
 - usar BullMQ solo para trabajo que no deba ejecutarse dentro del request HTTP, por ejemplo exportaciones grandes, recomputación de reportes, sincronizaciones o procesos batch.
 
 En esta API, cache probablemente te dé más impacto inmediato que BullMQ porque hoy la carga principal parece ser lectura directa desde Oracle.
 
-Mejoras aplicadas en endpoints paginados (`/clientes`, `/lotes`, `/fracciones`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`, `/total-pagado-mes`, `/pagos-por-franja`):
+Mejoras aplicadas en endpoints paginados (`/clientes`, `/lotes`, `/fracciones`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`, `/total-pagado-mes`, `/recupero`, `/pagos-por-franja`):
 
 - `incluirTotal` queda desactivado por defecto para evitar `COUNT(*)` en cada request;
 - hay cache TTL corto en memoria para requests repetidas con los mismos filtros;
@@ -454,6 +457,49 @@ Ejemplos:
 ```http
 GET /fracciones?limite=100&offset=0
 GET /fracciones?limite=100&offset=0&incluirTotal=true
+```
+
+### Recupero
+
+Ruta base:
+
+```text
+/recupero
+```
+
+Que devuelve:
+
+- listado desde `ADCC.CBI_CLIENTES_V ccv` unido con `ADCC.CBI_INMC093_V inm` por `inm.CONTRATO = ccv.NUMERO_CONTRATO`;
+- columnas `contrato`, `vendedor`, `nombreCompleto`, `ciRuc`, `telefonoParticular`, `sucursal`, `nombreFraccion`, `manzana`, `lote`, `vencimiento`, `importeCuota`, `plazo` y `mesesAtraso`;
+- ordenado por `inm.CONTRATO`, `inm.FRACCION`, `inm.MANZANA`, `inm.LOTE` e `inm.VENCIMIENTO`.
+
+Parámetros principales:
+
+- `limit` o `limite`
+- `offset`
+- `incluirTotal`
+- `contrato` o `numeroContrato`
+- `ciRuc` o `documento`
+- `vendedor`
+- `nombreCompleto`
+- `telefonoParticular`
+- `sucursal`
+- `nombreFraccion`
+- `manzana`
+- `lote`
+- `vencimientoDesde` o `fechaDesde`
+- `vencimientoHasta` o `fechaHasta`
+- `importeCuota`, `importeCuotaDesde`, `importeCuotaHasta`
+- `plazo`, `plazoDesde`, `plazoHasta`
+- `mesesAtraso`, `mesesAtrasoDesde`, `mesesAtrasoHasta`
+
+Ejemplos:
+
+```http
+GET /recupero?limite=100&offset=0
+GET /recupero?contrato=00012345&limite=50
+GET /recupero?ciRuc=1234567&incluirTotal=true
+GET /recupero?mesesAtrasoDesde=1&mesesAtrasoHasta=6&fechaHasta=2026-07-01
 ```
 
 ### Total pagado
@@ -798,7 +844,7 @@ Notas:
 
 ## Paginación y rendimiento
 
-`clientes`, `lotes`, `fracciones`, `cuotas-pagadas`, `total-pagado`, `total-pagado-mes`, `pagos-por-franja`, `detalle-cuotas` y `cuotas-general` soportan paginación por `offset`. `estado-cuentas`, `cuotas-vencidas`, `cobranzas` y `cobranzas-v2` usan `cursor` como mecanismo recomendado y mantienen `offset` solo por compatibilidad.
+`clientes`, `lotes`, `fracciones`, `cuotas-pagadas`, `total-pagado`, `total-pagado-mes`, `recupero`, `pagos-por-franja`, `detalle-cuotas` y `cuotas-general` soportan paginación por `offset`. `estado-cuentas`, `cuotas-vencidas`, `cobranzas` y `cobranzas-v2` usan `cursor` como mecanismo recomendado y mantienen `offset` solo por compatibilidad.
 
 Recomendaciones:
 
@@ -806,7 +852,7 @@ Recomendaciones:
 - evitar `COUNT(*)` cuando no haga falta,
 - preferir `incluirTotal=false` en vistas grandes.
 
-En `estado-cuentas`, `cuotas-vencidas`, `cobranzas`, `cobranzas-v2`, `detalle-cuotas`, `cuotas-general`, `fracciones`, `total-pagado`, `total-pagado-mes` y `pagos-por-franja`, `incluirTotal` queda desactivado por defecto para responder mas rapido en consultas grandes.
+En `estado-cuentas`, `cuotas-vencidas`, `cobranzas`, `cobranzas-v2`, `detalle-cuotas`, `cuotas-general`, `fracciones`, `total-pagado`, `total-pagado-mes`, `recupero` y `pagos-por-franja`, `incluirTotal` queda desactivado por defecto para responder mas rapido en consultas grandes.
 
 ## Desarrollo de nuevos módulos
 
