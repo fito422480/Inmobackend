@@ -1,6 +1,7 @@
 .env
 .vscode
 /dist
+/dist-test
 /node_modules
 /.clinic
 exports/

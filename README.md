@@ -8,7 +8,7 @@ Backend en NestJS con adapter Fastify para consultar Oracle con o sin túnel SSH
 - Si SSH está habilitado, expone Oracle localmente a través de ese túnel.
 - Espera a que la ruta de conexión esté lista antes de crear el pool de TypeORM.
 - Si el túnel SSH está habilitado y se cae, intenta reconectar.
-- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `fracciones`, `cuotas-pagadas`, `detalle-cuotas`, `cuotas-general`, `cuotas-vencidas`, `cobranzas`, `cobranzas-v2`, `estado-cuentas`, `total-pagado`, `total-pagado-mes`, `recupero` y `pagos-por-franja`.
+- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `fracciones`, `cuotas-pagadas`, `detalle-cuotas`, `cuotas-general`, `cuotas-vencidas`, `cobranzas`, `cobranzas-v2`, `estado-cuentas`, `total-pagado`, `total-pagado-mes`, `recupero`, `pagos-por-franja` y `metas`.
 
 ## Stack
 
@@ -119,6 +119,9 @@ En producción:
 | `PAGOS_POR_FRANJA_MAX_LIMIT` | `5000` |
 | `PAGOS_POR_FRANJA_CACHE_TTL_MS` | `15000` |
 | `PAGOS_POR_FRANJA_CACHE_MAX_ITEMS` | `200` |
+| `METAS_TIME_ZONE` | `America/Asuncion` |
+| `METAS_CACHE_TTL_MS` | `15000` |
+| `METAS_CACHE_MAX_ITEMS` | `24` |
 
 Las variables de cache y `*_MAX_LIMIT` son opcionales. Si no las definís, cada servicio usa sus valores por defecto.
 
@@ -163,6 +166,7 @@ npm start
 | Script | Descripción |
 | --- | --- |
 | `npm run build` | Compila el proyecto a `dist/` |
+| `npm test` | Compila y ejecuta las pruebas de la API de metas |
 | `npm start` | Ejecuta `dist/main.js` |
 | `npm run start:dev` | Ejecuta el watcher con recompilación y reinicio automático |
 | `npm run start:prod` | Ejecuta `dist/main.js` |
@@ -205,7 +209,7 @@ npm run profile:doctor:lotes
 Nota:
 - `clinic.js` es útil para diagnóstico, pero con Node 22 puede fallar o dar resultados inconsistentes.
 - Si eso pasa, conviene correr `clinic` con Node 20 LTS o usar `autocannon` junto con el profiler nativo de Node.
-- Si necesitas ver el SQL real de un request lento, activa `LOG_SLOW_SQL=true` en `.env` y revisa los logs del backend en `/clientes`, `/lotes`, `/fracciones`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`, `/total-pagado-mes`, `/recupero` y `/pagos-por-franja`.
+- Si necesitas ver el SQL real de un request lento, activa `LOG_SLOW_SQL=true` en `.env` y revisa los logs del backend en `/clientes`, `/lotes`, `/fracciones`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`, `/total-pagado-mes`, `/recupero`, `/pagos-por-franja` y `/metas`.
 
 ### `GET /estado-cuentas`
 
@@ -232,7 +236,7 @@ curl -H "x-api-key: TU_API_KEY" "http://localhost:3000/estado-cuentas?documento=
 
 Recomendación práctica:
 
-- usar cache para lecturas repetidas con exactamente los mismos filtros, especialmente en `/clientes`, `/lotes`, `/fracciones`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`, `/total-pagado-mes`, `/recupero` y `/pagos-por-franja`;
+- usar cache para lecturas repetidas con exactamente los mismos filtros, especialmente en `/clientes`, `/lotes`, `/fracciones`, `/cuotas-pagadas`, `/detalle-cuotas`, `/cuotas-general`, `/cuotas-vencidas`, `/cobranzas`, `/cobranzas-v2`, `/estado-cuentas`, `/total-pagado`, `/total-pagado-mes`, `/recupero`, `/pagos-por-franja` y `/metas`;
 - usar BullMQ solo para trabajo que no deba ejecutarse dentro del request HTTP, por ejemplo exportaciones grandes, recomputación de reportes, sincronizaciones o procesos batch.
 
 En esta API, cache probablemente te dé más impacto inmediato que BullMQ porque hoy la carga principal parece ser lectura directa desde Oracle.
@@ -565,6 +569,66 @@ GET /total-pagado-mes?fechaDesde=2026-01-01&fechaHasta=2026-05-30&numeroCuotaMin
 ```
 
 Para replicar exactamente `FECHA_PAGO >= DATE '2026-01-01' AND FECHA_PAGO < DATE '2026-05-31'`, usa `fechaDesde=2026-01-01&fechaHasta=2026-05-30`, porque el endpoint interpreta `fechaHasta` como inclusiva.
+
+### Metas de cobranza
+
+Ruta base:
+
+```text
+/metas
+```
+
+Calcula en una sola consulta la cartera segmentada según las reglas de Mati,
+Jesus, Fernando y Judiciales sobre `ADCC.CBI_INMC093_FOTO_V`. Siempre devuelve
+los cuatro responsables, aunque alguno tenga valor cero.
+
+Cada elemento contiene:
+
+- `importeCuotas`: suma de `IMPORTE_CUOTA` según la regla del responsable;
+- `saldoVencido`: suma de `SALDO_VENCIDO` para Jesus, Fernando y Judiciales;
+- `valorCartera`: `importeCuotas + saldoVencido`;
+- `tramoMora`: descripción del rango aplicado.
+
+El parámetro opcional `mes` usa formato `YYYY-MM`. Si no se envía, se toma el
+mes actual según `METAS_TIME_ZONE`, cuyo valor por defecto es
+`America/Asuncion`. El período afecta los cortes de vencimiento de la regla de
+Mati.
+
+Ejemplos:
+
+```http
+GET /metas
+GET /metas?mes=2026-08
+```
+
+Respuesta resumida:
+
+```json
+{
+  "periodo": {
+    "mes": "2026-08",
+    "fechaInicio": "2026-08-01",
+    "fechaFin": "2026-08-31",
+    "fechaFinMesAnterior": "2026-07-31"
+  },
+  "data": [
+    {
+      "codigo": "MATI",
+      "cobrador": "Mati",
+      "tramoMora": "Sin mora",
+      "importeCuotas": 0,
+      "saldoVencido": 0,
+      "valorCartera": 0
+    }
+  ],
+  "totalCartera": 0
+}
+```
+
+Importante: las reglas recibidas asignan responsables por tramo de mora, pero
+no filtran la columna Oracle `COBRADOR`. Por eso este endpoint conserva esa
+lógica y calcula segmentos globales; no agrupa por el valor almacenado en dicha
+columna.
 
 ### Pagos por franja
 
