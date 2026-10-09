@@ -4,7 +4,7 @@
   "description": "NestJS backend con tunnel SSH a Oracle",
   "scripts": {
     "build": "nest build",
-    "test": "tsc -p tsconfig.spec.json && node --test dist-test/metas/metas.service.spec.js",
+    "test": "tsc -p tsconfig.spec.json && node --test dist-test/metas/metas.service.spec.js dist-test/ingresos/ingresos.service.spec.js",
     "bench:clientes": "node scripts/run-autocannon.js clientes",
     "bench:lotes": "node scripts/run-autocannon.js lotes",
     "bench:cuotas-pagadas": "node scripts/run-autocannon.js cuotasPagadas",
