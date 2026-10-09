@@ -19,6 +19,7 @@ import { RecuperoModule } from './recupero/recupero.module';
 import { TotalPagadoModule } from './total-pagado/total-pagado.module';
 import { TotalPagadoMesModule } from './total-pagado-mes/total-pagado-mes.module';
 import { MetasModule } from './metas/metas.module';
+import { IngresosModule } from './ingresos/ingresos.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -41,6 +42,7 @@ import { AppService } from './app.service';
     TotalPagadoModule,
     TotalPagadoMesModule,
     MetasModule,
+    IngresosModule,
   ],
   controllers: [AppController],
   providers: [

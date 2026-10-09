@@ -8,7 +8,7 @@ Backend en NestJS con adapter Fastify para consultar Oracle con o sin túnel SSH
 - Si SSH está habilitado, expone Oracle localmente a través de ese túnel.
 - Espera a que la ruta de conexión esté lista antes de crear el pool de TypeORM.
 - Si el túnel SSH está habilitado y se cae, intenta reconectar.
-- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `fracciones`, `cuotas-pagadas`, `detalle-cuotas`, `cuotas-general`, `cuotas-vencidas`, `cobranzas`, `cobranzas-v2`, `estado-cuentas`, `total-pagado`, `total-pagado-mes`, `recupero`, `pagos-por-franja` y `metas`.
+- Publica endpoints para consultar vistas Oracle como `clientes`, `lotes`, `fracciones`, `cuotas-pagadas`, `detalle-cuotas`, `cuotas-general`, `cuotas-vencidas`, `cobranzas`, `cobranzas-v2`, `estado-cuentas`, `total-pagado`, `total-pagado-mes`, `recupero`, `pagos-por-franja`, `metas`, `ingresos-dia`, `notas-credito` e `ingresos-otros`.
 
 ## Stack
 
@@ -122,6 +122,8 @@ En producción:
 | `METAS_TIME_ZONE` | `America/Asuncion` |
 | `METAS_CACHE_TTL_MS` | `15000` |
 | `METAS_CACHE_MAX_ITEMS` | `24` |
+| `INGRESOS_CACHE_TTL_MS` | `15000` |
+| `INGRESOS_CACHE_MAX_ITEMS` | `200` |
 
 Las variables de cache y `*_MAX_LIMIT` son opcionales. Si no las definís, cada servicio usa sus valores por defecto.
 
@@ -166,7 +168,7 @@ npm start
 | Script | Descripción |
 | --- | --- |
 | `npm run build` | Compila el proyecto a `dist/` |
-| `npm test` | Compila y ejecuta las pruebas de la API de metas |
+| `npm test` | Compila y ejecuta las pruebas de las APIs de metas e ingresos |
 | `npm start` | Ejecuta `dist/main.js` |
 | `npm run start:dev` | Ejecuta el watcher con recompilación y reinicio automático |
 | `npm run start:prod` | Ejecuta `dist/main.js` |
@@ -950,3 +952,14 @@ Revisar:
 ### El puerto local está ocupado
 
 El servicio intenta usar automáticamente el siguiente puerto libre.
+
+## Ingresos del dia (`/ingresos-dia`, `/notas-credito`, `/ingresos-otros`)
+
+Se calculan sobre `ADCC.CBI_FINC001_V` (documentos y tesoreria). Todos exigen fecha (`fecha=AAAA-MM-DD` o `fechaDesde`/`fechaHasta`, maximo 62 dias).
+
+- **Cada documento se cuenta una sola vez.** La vista repite el documento por cada linea de detalle (con el mismo total de encabezado); sumar filas infla los importes. El servicio agrupa por `CLAVE` antes de sumar.
+- Categorias: `RECIBO_CUOTAS` (recibos de cobro, tipo 6), `INTERESES`, `GESTION_COBRANZAS`, `CESION_DERECHOS`, `OTROS_INGRESOS` (facturas contado con cuenta/caja, tipo 9), `NOTA_CREDITO` (tipo 16) y `FACTURACION_PROPIETARIOS`.
+- `FACTURACION_PROPIETARIOS` son las comisiones de administracion, ventas e intereses, recuperos de gastos y gastos de proyecto que Inmo factura a los propietarios (ej. Fondo Investor). **No son cobranza de cuotas** y quedan fuera de `ingresoOperativo`; el campo `concepto` indica cuales (varios se unen con `+`).
+- `ingresoOperativo` = cuotas + intereses + gestion + cesion + otros; no resta notas de credito.
+- Se excluyen: facturas contado sin cuenta (gemelas de cada recibo), depositos/extracciones (12/13, movimiento entre cajas), cancelaciones internas de saldo (47), autofacturas (7) y la liquidacion a propietarios (`INMLIQPROP`).
+- Validado contra el arqueo del 2026-10-05: cuotas 444.804.600, intereses 7.169.612, otros 3.775.159.
